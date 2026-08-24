@@ -1,0 +1,310 @@
+@import 'tailwindcss';
+
+@import 'tw-animate-css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans:
+        Instrument Sans, ui-sans-serif, system-ui, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+        'Noto Color Emoji';
+
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+
+    --color-sidebar: var(--sidebar-background);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentColor);
+    }
+}
+
+@layer utilities {
+    body,
+    html {
+        --font-sans:
+            'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
+            'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+            'Noto Color Emoji';
+    }
+}
+
+:root {
+    --background: hsl(340 33% 99%);
+    --foreground: hsl(320 16% 15%);
+    --card: hsl(0 0% 100%);
+    --card-foreground: hsl(320 16% 15%);
+    --popover: hsl(0 0% 100%);
+    --popover-foreground: hsl(320 16% 15%);
+    --primary: hsl(330 52% 46%);
+    --primary-foreground: hsl(0 0% 100%);
+    --secondary: hsl(326 30% 95%);
+    --secondary-foreground: hsl(330 40% 30%);
+    --muted: hsl(325 25% 96%);
+    --muted-foreground: hsl(320 8% 46%);
+    --accent: hsl(330 45% 95%);
+    --accent-foreground: hsl(330 45% 32%);
+    --destructive: hsl(357 74% 54%);
+    --destructive-foreground: hsl(0 0% 100%);
+    --border: hsl(326 24% 91%);
+    --input: hsl(326 24% 89%);
+    --ring: hsl(330 52% 56%);
+    --chart-1: hsl(330 60% 55%);
+    --chart-2: hsl(275 50% 58%);
+    --chart-3: hsl(180 45% 42%);
+    --chart-4: hsl(38 85% 60%);
+    --chart-5: hsl(210 60% 55%);
+    --radius: 0.75rem;
+    --sidebar-background: hsl(335 30% 98%);
+    --sidebar-foreground: hsl(320 12% 32%);
+    --sidebar-primary: hsl(330 52% 46%);
+    --sidebar-primary-foreground: hsl(0 0% 100%);
+    --sidebar-accent: hsl(330 44% 94%);
+    --sidebar-accent-foreground: hsl(330 50% 34%);
+    --sidebar-border: hsl(326 24% 92%);
+    --sidebar-ring: hsl(330 52% 56%);
+    --sidebar: hsl(335 30% 98%);
+}
+
+.dark {
+    --background: hsl(318 16% 8%);
+    --foreground: hsl(330 15% 94%);
+    --card: hsl(318 15% 11%);
+    --card-foreground: hsl(330 15% 94%);
+    --popover: hsl(318 15% 11%);
+    --popover-foreground: hsl(330 15% 94%);
+    --primary: hsl(330 62% 62%);
+    --primary-foreground: hsl(320 30% 12%);
+    --secondary: hsl(320 12% 18%);
+    --secondary-foreground: hsl(330 15% 94%);
+    --muted: hsl(320 10% 17%);
+    --muted-foreground: hsl(320 10% 62%);
+    --accent: hsl(320 15% 21%);
+    --accent-foreground: hsl(330 20% 92%);
+    --destructive: hsl(357 65% 58%);
+    --destructive-foreground: hsl(0 0% 100%);
+    --border: hsl(320 12% 20%);
+    --input: hsl(320 12% 23%);
+    --ring: hsl(330 62% 62%);
+    --chart-1: hsl(330 70% 65%);
+    --chart-2: hsl(275 60% 68%);
+    --chart-3: hsl(180 50% 52%);
+    --chart-4: hsl(38 85% 62%);
+    --chart-5: hsl(210 65% 62%);
+    --sidebar-background: hsl(318 18% 10%);
+    --sidebar-foreground: hsl(330 12% 88%);
+    --sidebar-primary: hsl(330 62% 62%);
+    --sidebar-primary-foreground: hsl(320 30% 12%);
+    --sidebar-accent: hsl(320 14% 18%);
+    --sidebar-accent-foreground: hsl(330 20% 92%);
+    --sidebar-border: hsl(320 12% 18%);
+    --sidebar-ring: hsl(330 62% 62%);
+    --sidebar: hsl(318 18% 10%);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+
+@layer components {
+    /* Material-style elevation levels */
+    .card-elevated {
+        box-shadow:
+            0 1px 2px hsl(320 30% 20% / 0.04),
+            0 8px 24px -12px hsl(320 40% 30% / 0.12);
+    }
+    .elevation-1 {
+        box-shadow: 0 1px 3px hsl(320 30% 20% / 0.10), 0 1px 2px hsl(320 30% 20% / 0.06);
+    }
+    .elevation-2 {
+        box-shadow: 0 3px 6px hsl(320 30% 20% / 0.10), 0 2px 4px hsl(320 30% 20% / 0.06);
+    }
+
+    /* Shared form field — keeps every native <select> and input consistent */
+    .field {
+        @apply h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-[color,box-shadow] focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-not-allowed disabled:opacity-50;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+   Login animated background — a subtle drifting dot pattern plus slow floating
+   outlined shapes. Pure pattern/shape motion, no gradients.
+--------------------------------------------------------------------------- */
+.auth-bg {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.auth-bg::before {
+    content: '';
+    position: absolute;
+    inset: -25%;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Ccircle cx='2' cy='2' r='1.4' fill='%23a13a72' fill-opacity='0.16'/%3E%3C/svg%3E");
+    background-size: 34px 34px;
+    animation: auth-drift 50s linear infinite;
+}
+.auth-shape {
+    position: absolute;
+    border-radius: 9999px;
+    border: 1.5px solid hsl(330 52% 46% / 0.12);
+    will-change: transform;
+}
+.auth-shape--a {
+    width: 22rem;
+    height: 22rem;
+    top: -6rem;
+    left: -5rem;
+    animation: auth-float-1 16s ease-in-out infinite;
+}
+.auth-shape--b {
+    width: 30rem;
+    height: 30rem;
+    bottom: -10rem;
+    right: -8rem;
+    border-color: hsl(272 45% 55% / 0.12);
+    animation: auth-float-2 20s ease-in-out infinite;
+}
+.auth-shape--c {
+    width: 12rem;
+    height: 12rem;
+    top: 40%;
+    right: 12%;
+    border-color: hsl(330 52% 46% / 0.10);
+    animation: auth-float-1 13s ease-in-out infinite;
+}
+
+@keyframes auth-drift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(34px, 34px, 0); }
+}
+@keyframes auth-float-1 {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-26px); }
+}
+@keyframes auth-float-2 {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(24px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .auth-bg::before,
+    .auth-shape { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Print / Save-as-PDF: show only the .printable region, hide app chrome.
+--------------------------------------------------------------------------- */
+.print-only {
+    display: none;
+}
+@media print {
+    body {
+        background: white !important;
+    }
+    body * {
+        visibility: hidden;
+    }
+    .printable,
+    .printable * {
+        visibility: visible;
+    }
+    /* Neutralise the sidebar layout so the printable region anchors to the page
+       (full width, centred) instead of the offset/narrowed main content area. */
+    [data-slot='sidebar'] {
+        display: none !important;
+    }
+    [data-slot='sidebar-inset'] {
+        position: static !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+    }
+    .printable {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        padding: 1rem !important;
+    }
+    .no-print {
+        display: none !important;
+    }
+    .print-only {
+        display: block !important;
+    }
+    /* Per-section printing: sections not being printed are removed from flow
+       (display:none, not just hidden) so they never leave blank pages. */
+    .print-hidden {
+        display: none !important;
+    }
+    /* Keep table rows from splitting awkwardly across pages. */
+    tr,
+    .card-elevated {
+        break-inside: avoid;
+    }
+}
