@@ -6,17 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import AreaChart from '@/components/charts/AreaChart.vue';
 import BarChart from '@/components/charts/BarChart.vue';
+import { Button } from '@/components/ui/button';
 import { dashboard } from '@/routes';
 import {
     Users,
-    CalendarCheck,
     CalendarDays,
-    Layers,
     ReceiptText,
     TriangleAlert,
     CalendarClock,
     Wallet,
     ArrowRight,
+    Plus,
 } from '@lucide/vue';
 
 defineOptions({
@@ -48,7 +48,12 @@ const props = defineProps<{
     currency: string;
 }>();
 
-const appName = usePage().props.name as string;
+const page = usePage();
+const appName = page.props.name as string;
+const firstName = computed(() => {
+    const full = (page.props.auth?.user?.name as string | undefined) ?? '';
+    return full.split(' ')[0] || 'there';
+});
 const money = (n: number) =>
     `${props.currency}${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -60,13 +65,44 @@ const today = computed(() =>
     new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
 );
 
+// Four headline metrics, reference-style: label + big value + a contextual sub-line.
 const kpis = computed(() => [
-    { label: "Today's revenue", value: money(props.stats.revenue_today), icon: Wallet, chip: 'bg-primary/10 text-primary' },
-    { label: 'This month', value: money(props.stats.revenue_month), icon: ReceiptText, chip: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950' },
-    { label: 'Patients', value: props.stats.patients, icon: Users, chip: 'bg-sky-100 text-sky-600 dark:bg-sky-950' },
-    { label: 'Active courses', value: props.stats.active_courses, icon: Layers, chip: 'bg-violet-100 text-violet-600 dark:bg-violet-950' },
-    { label: 'Sessions today', value: props.stats.sessions_today, icon: CalendarCheck, chip: 'bg-amber-100 text-amber-600 dark:bg-amber-950' },
-    { label: 'Appts today', value: props.stats.appointments_today, icon: CalendarDays, chip: 'bg-rose-100 text-rose-600 dark:bg-rose-950' },
+    {
+        label: "Today's revenue",
+        value: money(props.stats.revenue_today),
+        icon: Wallet,
+        chip: 'bg-primary/10 text-primary',
+        sub: 'This month',
+        subValue: money(props.stats.revenue_month),
+        subClass: 'text-emerald-600 dark:text-emerald-400',
+    },
+    {
+        label: 'Appointments today',
+        value: props.stats.appointments_today,
+        icon: CalendarDays,
+        chip: 'bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400',
+        sub: 'Sessions performed',
+        subValue: String(props.stats.sessions_today),
+        subClass: 'text-muted-foreground',
+    },
+    {
+        label: 'Patients',
+        value: props.stats.patients,
+        icon: Users,
+        chip: 'bg-sky-100 text-sky-600 dark:bg-sky-950 dark:text-sky-400',
+        sub: 'Active courses',
+        subValue: String(props.stats.active_courses),
+        subClass: 'text-muted-foreground',
+    },
+    {
+        label: 'Open invoices',
+        value: props.stats.open_invoices,
+        icon: ReceiptText,
+        chip: 'bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400',
+        sub: 'Outstanding',
+        subValue: money(props.stats.outstanding_amount),
+        subClass: props.stats.outstanding_amount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+    },
 ]);
 </script>
 
@@ -75,22 +111,36 @@ const kpis = computed(() => [
 
     <div class="flex h-full flex-1 flex-col gap-6 p-4 md:p-6">
         <!-- Greeting -->
-        <div>
-            <h1 class="text-2xl font-semibold tracking-tight">{{ greeting }}</h1>
-            <p class="text-sm text-muted-foreground">{{ appName }} · {{ today }}</p>
+        <div class="flex flex-wrap items-end justify-between gap-4">
+            <div>
+                <h1 class="text-2xl font-semibold tracking-tight">{{ greeting }}, {{ firstName }}!</h1>
+                <p class="mt-1 text-sm text-muted-foreground">{{ appName }} · {{ today }}</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <Button as-child variant="outline">
+                    <Link href="/appointments"><CalendarDays class="size-4" /> Appointments</Link>
+                </Button>
+                <Button as-child>
+                    <Link href="/checkout"><Plus class="size-4" /> New checkout</Link>
+                </Button>
+            </div>
         </div>
 
         <!-- KPI cards -->
-        <div class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-            <Card v-for="kpi in kpis" :key="kpi.label" class="border-none">
-                <CardContent class="flex items-center gap-3 p-4">
-                    <div class="flex size-11 shrink-0 items-center justify-center rounded-xl" :class="kpi.chip">
-                        <component :is="kpi.icon" class="size-5" />
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Card v-for="kpi in kpis" :key="kpi.label" class="border-none transition-shadow hover:shadow-[0_2px_4px_hsl(320_30%_20%/0.06),0_16px_40px_-20px_hsl(320_40%_30%/0.22)]">
+                <CardContent class="p-5">
+                    <div class="flex items-start justify-between gap-2">
+                        <p class="text-sm font-medium text-muted-foreground">{{ kpi.label }}</p>
+                        <div class="flex size-9 shrink-0 items-center justify-center rounded-xl" :class="kpi.chip">
+                            <component :is="kpi.icon" class="size-4.5" />
+                        </div>
                     </div>
-                    <div class="min-w-0">
-                        <p class="truncate text-xl font-semibold leading-none tracking-tight">{{ kpi.value }}</p>
-                        <p class="mt-1 truncate text-xs text-muted-foreground">{{ kpi.label }}</p>
-                    </div>
+                    <p class="mt-3 text-3xl font-semibold leading-none tracking-tight">{{ kpi.value }}</p>
+                    <p class="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                        {{ kpi.sub }}
+                        <span class="font-semibold" :class="kpi.subClass">{{ kpi.subValue }}</span>
+                    </p>
                 </CardContent>
             </Card>
         </div>

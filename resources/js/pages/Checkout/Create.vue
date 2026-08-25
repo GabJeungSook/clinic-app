@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, useForm } from '@inertiajs/vue3';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +17,7 @@ interface CourseOpt { value: string; patient_id: string; service_id: string; lab
 interface RetailOpt { value: string; label: string; price: number; unit: string | null; on_hand: number; reorder: number; is_low: boolean }
 interface ConsumableOpt { value: string; label: string; base_unit_id: string; on_hand: number; is_low: boolean }
 interface Consumable { inventory_item_id: string; quantity: number; unit_id: string }
-interface ServiceLine { service_id: string; course_id: string; price: number; discount: number; promotion_id: string; notes: string; consumables: Consumable[] }
+interface ServiceLine { service_id: string; course_id: string; sessions: number; price: number; discount: number; promotion_id: string; notes: string; consumables: Consumable[] }
 interface RetailLine { inventory_item_id: string; label: string; unit: string; quantity: number; unit_price: number; discount: number; on_hand: number; is_low: boolean }
 interface ManualLine { description: string; quantity: number; unit_price: number; discount: number }
 interface PaymentLine { method: string; amount: number; reference: string }
@@ -36,6 +36,7 @@ const props = defineProps<{
     preselectedPatient: string | null;
     preselectedService: string | null;
     preselectedCourse: string | null;
+    appointmentPrefills: Record<string, Array<{ service_id: string; course_id: string | null }>>;
 }>();
 
 const servicesById = computed(() => Object.fromEntries(props.services.map((s) => [s.value, s])));
@@ -63,7 +64,7 @@ const savePatient = () => patientForm.post('/checkout/patient', { onSuccess: () 
 // ── Service lines ────────────────────────────────────────────────────────────
 const bomToConsumables = (s?: ServiceOpt): Consumable[] =>
     s ? s.bom.map((b) => ({ inventory_item_id: b.inventory_item_id, quantity: b.quantity, unit_id: b.unit_id ?? '' })) : [];
-const blankService = (): ServiceLine => ({ service_id: '', course_id: '', price: 0, discount: 0, promotion_id: '', notes: '', consumables: [] });
+const blankService = (): ServiceLine => ({ service_id: '', course_id: '', sessions: 1, price: 0, discount: 0, promotion_id: '', notes: '', consumables: [] });
 const addService = () => form.services.push(blankService());
 const removeService = (i: number) => form.services.splice(i, 1);
 
@@ -71,21 +72,42 @@ function onServiceChange(line: ServiceLine) {
     const s = servicesById.value[line.service_id];
     line.course_id = '';
     if (s) {
-        line.price = s.price;
+        line.price = s.price;   // per-session price
         line.consumables = bomToConsumables(s);
     }
 }
-function onCourseChange(line: ServiceLine) {
-    const s = servicesById.value[line.service_id];
-    line.price = line.course_id ? 0 : s ? s.price : 0;
-}
-const coursesFor = (line: ServiceLine): CourseOpt[] =>
-    props.courses.filter((c) => c.patient_id === form.patient_id && c.service_id === line.service_id);
 const patientCourses = computed(() => props.courses.filter((c) => c.patient_id === form.patient_id));
 function addCourseLine(course: CourseOpt) {
     const s = servicesById.value[course.service_id];
-    form.services.push({ service_id: course.service_id, course_id: course.value, price: 0, discount: 0, promotion_id: '', notes: '', consumables: bomToConsumables(s) });
+    form.services.push({ service_id: course.service_id, course_id: course.value, sessions: 1, price: 0, discount: 0, promotion_id: '', notes: '', consumables: bomToConsumables(s) });
 }
+const serviceLineNet = (l: ServiceLine) => Math.max(0, Number(l.sessions) * Number(l.price) - Number(l.discount));
+
+// Auto-load the service(s) the patient came in for, from today's booking.
+const prefilledFrom = ref<string | null>(null);
+function pushServiceRef(serviceId: string, courseId: string | null) {
+    const s = servicesById.value[serviceId];
+    if (!s) return;
+    const course = courseId ? props.courses.find((c) => c.value === courseId) : undefined;
+    form.services.push({
+        service_id: s.value,
+        course_id: course?.value ?? '',
+        sessions: 1,
+        price: course ? 0 : s.price,
+        discount: 0,
+        promotion_id: '',
+        notes: '',
+        consumables: bomToConsumables(s),
+    });
+}
+function maybePrefillFromAppointment(patientId: string) {
+    if (!patientId || form.services.length > 0) return;
+    const list = props.appointmentPrefills[patientId];
+    if (!list?.length) return;
+    list.forEach((r) => pushServiceRef(r.service_id, r.course_id));
+    prefilledFrom.value = patientId;
+}
+watch(() => form.patient_id, (id) => maybePrefillFromAppointment(id));
 const addConsumable = (line: ServiceLine) => line.consumables.push({ inventory_item_id: '', quantity: 1, unit_id: '' });
 function onConsumableChange(c: Consumable) {
     const it = consumableById.value[c.inventory_item_id];
@@ -128,7 +150,7 @@ const removeManual = (i: number) => form.manual.splice(i, 1);
 // ── Totals ───────────────────────────────────────────────────────────────────
 const lineNet = (qty: number, price: number, discount: number) => Math.max(0, Number(qty) * Number(price) - Number(discount));
 const subtotal = computed(() =>
-    form.services.reduce((s, l) => s + Math.max(0, Number(l.price) - Number(l.discount)), 0) +
+    form.services.reduce((s, l) => s + serviceLineNet(l), 0) +
     form.retail.reduce((s, l) => s + lineNet(l.quantity, l.unit_price, l.discount), 0) +
     form.manual.reduce((s, l) => s + lineNet(l.quantity, l.unit_price, l.discount), 0));
 const tax = computed(() => {
@@ -161,6 +183,7 @@ function submit() {
                     .map((l) => ({
                         service_id: l.service_id,
                         course_id: l.course_id || null,
+                        sessions: Math.max(1, Number(l.sessions) || 1),
                         price: Number(l.price) || 0,
                         discount: Number(l.discount) || 0,
                         promotion_id: l.promotion_id || null,
@@ -188,6 +211,7 @@ onMounted(() => {
             form.services.push({
                 service_id: s.value,
                 course_id: course?.value ?? '',
+                sessions: 1,
                 price: course ? 0 : s.price,
                 discount: 0,
                 promotion_id: '',
@@ -196,6 +220,8 @@ onMounted(() => {
             });
         }
     }
+    // Deep-linked or preselected patient → pull in their booking's services.
+    maybePrefillFromAppointment(form.patient_id);
 });
 </script>
 
@@ -242,41 +268,42 @@ onMounted(() => {
                     <Button type="button" variant="secondary" size="sm" @click="addService"><Plus class="size-4" /> Add service</Button>
                 </CardHeader>
                 <CardContent class="space-y-4">
+                    <p v-if="prefilledFrom === form.patient_id" class="rounded-lg bg-primary/5 px-3 py-2 text-xs font-medium text-primary">Loaded from the patient's appointment — adjust if needed.</p>
                     <p v-if="form.services.length === 0" class="py-2 text-center text-sm text-muted-foreground">No services added.</p>
                     <div v-for="(line, i) in form.services" :key="i" class="rounded-lg border p-3">
                         <div class="mb-3 flex items-center justify-between">
                             <span class="text-sm font-medium text-muted-foreground">Service {{ i + 1 }}</span>
                             <Button variant="ghost" size="icon-sm" @click="removeService(i)"><Trash2 class="size-4 text-rose-600" /></Button>
                         </div>
-                        <div class="grid gap-4 md:grid-cols-2">
-                            <div class="grid gap-1.5">
-                                <Label>Service</Label>
-                                <SearchSelect v-model="line.service_id" :options="services" placeholder="Select service…" @update:model-value="onServiceChange(line)" />
-                            </div>
-                            <div class="grid gap-1.5">
-                                <Label>Draw from package</Label>
-                                <SearchSelect
-                                    v-model="line.course_id"
-                                    :options="coursesFor(line).map((c) => ({ value: c.value, label: `${c.label} — ${c.remaining} left` }))"
-                                    placeholder="Pay as single service"
-                                    empty-label="Pay as single service"
-                                    :disabled="coursesFor(line).length === 0"
-                                    @update:model-value="onCourseChange(line)"
-                                />
-                            </div>
+                        <div class="grid gap-1.5">
+                            <Label>Service</Label>
+                            <SearchSelect v-model="line.service_id" :options="services" placeholder="Select service…" @update:model-value="onServiceChange(line)" />
                         </div>
-                        <div class="mt-4 grid gap-4 sm:grid-cols-3">
-                            <div class="grid gap-1.5">
-                                <Label>Price</Label>
-                                <Input type="number" step="0.01" min="0" v-model="line.price" />
-                                <p v-if="line.course_id" class="text-xs text-muted-foreground">Covered by package (₱0).</p>
-                            </div>
-                            <div class="grid gap-1.5"><Label>Discount</Label><Input type="number" step="0.01" min="0" v-model="line.discount" /></div>
-                            <div class="grid gap-1.5">
-                                <Label>Promotion</Label>
-                                <SearchSelect v-model="line.promotion_id" :options="promotions" placeholder="— none —" empty-label="— none —" />
-                            </div>
+
+                        <!-- Prepaid session drawn from an existing package -->
+                        <div v-if="line.course_id" class="mt-3 rounded-md bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+                            Drawing one prepaid session from the package — no charge (₱0).
                         </div>
+
+                        <!-- Per-session billing (pay 1 today, or prepay more) -->
+                        <template v-else>
+                            <div class="mt-4 grid gap-4 sm:grid-cols-4">
+                                <div class="grid gap-1.5"><Label>Sessions</Label><Input type="number" min="1" step="1" v-model="line.sessions" /></div>
+                                <div class="grid gap-1.5"><Label>Price / session</Label><Input type="number" step="0.01" min="0" v-model="line.price" /></div>
+                                <div class="grid gap-1.5"><Label>Discount</Label><Input type="number" step="0.01" min="0" v-model="line.discount" /></div>
+                                <div class="grid gap-1.5">
+                                    <Label>Promotion</Label>
+                                    <SearchSelect v-model="line.promotion_id" :options="promotions" placeholder="— none —" empty-label="— none —" />
+                                </div>
+                            </div>
+                            <div v-if="line.service_id" class="mt-2 flex items-center justify-between text-sm">
+                                <span class="text-muted-foreground">
+                                    {{ line.sessions }} × {{ money(Number(line.price)) }}
+                                    <span v-if="Number(line.sessions) > 1">· 1 performed today, {{ Number(line.sessions) - 1 }} prepaid</span>
+                                </span>
+                                <span class="font-semibold">{{ money(serviceLineNet(line)) }}</span>
+                            </div>
+                        </template>
                         <div class="mt-4 grid gap-1.5">
                             <Label>Notes</Label>
                             <Input v-model="line.notes" placeholder="e.g. area treated, observations" />

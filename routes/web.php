@@ -53,6 +53,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('can:appointments.view')->group(function () {
         Route::get('appointments', [AppointmentController::class, 'index'])->name('appointments.index');
         Route::get('appointments/create', [AppointmentController::class, 'create'])->name('appointments.create');
+        Route::get('appointments/{appointment}/edit', [AppointmentController::class, 'edit'])->name('appointments.edit');
         Route::post('appointments', [AppointmentController::class, 'store'])->name('appointments.store');
         Route::put('appointments/{appointment}', [AppointmentController::class, 'update'])->name('appointments.update');
         Route::post('appointments/{appointment}/status', [AppointmentController::class, 'updateStatus'])->name('appointments.status');
@@ -62,6 +63,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Reports
     Route::middleware('can:reports.view')->group(function () {
         Route::get('reports/revenue', [ReportController::class, 'revenue'])->name('reports.revenue');
+        Route::get('reports/sales', [ReportController::class, 'sales'])->name('reports.sales');
         Route::get('reports/appointments', [ReportController::class, 'appointments'])->name('reports.appointments');
         Route::get('reports/patients', [ReportController::class, 'patients'])->name('reports.patients');
         Route::get('reports/treatments', [ReportController::class, 'treatments'])->name('reports.treatments');
@@ -116,6 +118,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('invoices', InvoiceController::class)->only(['index', 'show']);
         Route::post('invoices/{invoice}/payments', [InvoiceController::class, 'recordPayment'])->name('invoices.payments.store');
         Route::post('invoices/{invoice}/receipt', [InvoiceController::class, 'generateReceipt'])->name('invoices.receipt');
+    });
+    // Void / refund are corrective actions — managers only.
+    Route::middleware('can:billing.manage')->group(function () {
+        Route::post('invoices/{invoice}/void', [InvoiceController::class, 'void'])->name('invoices.void');
+        Route::post('invoices/{invoice}/refund', [InvoiceController::class, 'refund'])->name('invoices.refund');
     });
     Route::middleware('can:promotions.manage')->group(function () {
         Route::resource('promotions', PromotionController::class)->only(['index', 'store', 'update', 'destroy']);

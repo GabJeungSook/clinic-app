@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
-import { Printer } from '@lucide/vue';
+import { Printer, Download } from '@lucide/vue';
 import { usePrint } from '@/lib/print';
+import { downloadElementPdf, pdfDateStamp } from '@/lib/pdf';
 
 const props = defineProps<{
     title: string;
@@ -11,8 +12,20 @@ const props = defineProps<{
     subtitle?: string;
 }>();
 
+const root = ref<HTMLElement | null>(null);
+const downloading = ref(false);
+const downloadPdf = async () => {
+    downloading.value = true;
+    try {
+        await downloadElementPdf(root.value, [props.meta.clinic, props.title, pdfDateStamp()]);
+    } finally {
+        downloading.value = false;
+    }
+};
+
 const tabs = [
-    { label: 'Sales', href: '/reports/revenue' },
+    { label: 'Revenue', href: '/reports/revenue' },
+    { label: 'Sales', href: '/reports/sales' },
     { label: 'Appointments', href: '/reports/appointments' },
     { label: 'Patients', href: '/reports/patients' },
     { label: 'Treatments', href: '/reports/treatments' },
@@ -29,7 +42,7 @@ const { activeSection, printAll } = usePrint();
 </script>
 
 <template>
-    <div class="printable flex flex-col gap-6 p-4 md:p-6">
+    <div ref="root" class="printable flex flex-col gap-6 p-4 md:p-6">
         <!-- On-screen toolbar: report tabs + print-all button (hidden when printing) -->
         <div class="no-print flex flex-wrap items-center justify-between gap-3">
             <div class="inline-flex flex-wrap rounded-lg border bg-muted/40 p-0.5">
@@ -43,9 +56,14 @@ const { activeSection, printAll } = usePrint();
                     {{ t.label }}
                 </Link>
             </div>
-            <Button variant="outline" size="sm" @click="printAll">
-                <Printer class="mr-1.5 size-4" /> Print / Save as PDF
-            </Button>
+            <div class="flex items-center gap-2">
+                <Button variant="default" size="sm" :disabled="downloading" @click="downloadPdf">
+                    <Download class="mr-1.5 size-4" /> {{ downloading ? 'Preparing…' : 'Download PDF' }}
+                </Button>
+                <Button variant="outline" size="sm" @click="printAll">
+                    <Printer class="mr-1.5 size-4" /> Print
+                </Button>
+            </div>
         </div>
 
         <!-- Print-only header — shown only when printing the whole report -->

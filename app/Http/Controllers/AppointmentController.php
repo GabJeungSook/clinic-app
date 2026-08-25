@@ -10,10 +10,12 @@ use App\Models\Patient;
 use App\Models\Service;
 use App\Models\TreatmentCourse;
 use App\Models\User;
+use App\Support\Settings\Settings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -90,34 +92,90 @@ class AppointmentController extends Controller
      */
     private function mapAppointments($appointments)
     {
-        return $appointments->map(fn (Appointment $a) => [
-            'id' => $a->id,
-            'name' => $a->displayName(),
-            'phone' => $a->patient?->phone ?? $a->guest_phone,
-            'patient_id' => $a->patient_id,
-            'service' => $a->service?->name,
-            'service_id' => $a->service_id,
-            'course_id' => $a->course_id,
-            'staff' => $a->staff?->name,
-            'scheduled_at' => $a->scheduled_at?->toIso8601String(),
-            'date' => $a->scheduled_at?->toDateString(),
-            'time' => $a->scheduled_at?->format('g:iA'),
-            'status' => $a->status->value,
-            'notes' => $a->notes,
-        ]);
+        // Resolve every referenced service once so we can list their names.
+        $ids = $appointments->flatMap(fn (Appointment $a) => collect($a->services ?? [])->pluck('service_id'))
+            ->merge($appointments->pluck('service_id'))
+            ->filter()->unique();
+        $names = Service::query()->whereIn('id', $ids)->pluck('name', 'id');
+
+        return $appointments->map(function (Appointment $a) use ($names) {
+            $lineNames = collect($a->services ?? [])->pluck('service_id')->map(fn ($id) => $names[$id] ?? null)->filter();
+            if ($lineNames->isEmpty() && $a->service?->name) {
+                $lineNames = collect([$a->service->name]);
+            }
+
+            return [
+                'id' => $a->id,
+                'name' => $a->displayName(),
+                'phone' => $a->patient?->phone ?? $a->guest_phone,
+                'patient_id' => $a->patient_id,
+                'service' => $lineNames->isNotEmpty() ? $lineNames->implode(', ') : null,
+                'service_id' => $a->service_id,
+                'course_id' => $a->course_id,
+                'services' => collect($a->services ?? [])->map(fn ($s) => [
+                    'service_id' => $s['service_id'],
+                    'course_id' => $s['course_id'] ?? null,
+                ])->values(),
+                'staff' => $a->staff?->name,
+                'scheduled_at' => $a->scheduled_at?->toIso8601String(),
+                'date' => $a->scheduled_at?->toDateString(),
+                'time' => $a->scheduled_at?->format('g:iA'),
+                'status' => $a->status->value,
+                'notes' => $a->notes,
+            ];
+        });
     }
 
     public function create(Request $request): Response
     {
         return Inertia::render('Appointments/Create', [
+            ...$this->formOptions(),
+            'preselectedPatient' => $request->query('patient'),
+            'preselectedDate' => $request->query('date'),
+        ]);
+    }
+
+    public function edit(Appointment $appointment): Response
+    {
+        return Inertia::render('Appointments/Edit', [
+            ...$this->formOptions(),
+            'appointment' => [
+                'id' => $appointment->id,
+                'name' => $appointment->displayName(),
+                'patient_id' => $appointment->patient_id,
+                'service_id' => $appointment->service_id,
+                'course_id' => $appointment->course_id,
+                'services' => collect($appointment->services ?? [])->map(fn ($s) => [
+                    'service_id' => $s['service_id'],
+                    'course_id' => $s['course_id'] ?? null,
+                ])->values(),
+                'staff_id' => $appointment->staff_id,
+                'scheduled_at' => $appointment->scheduled_at?->format('Y-m-d\TH:i'),
+                'duration_minutes' => $appointment->duration_minutes,
+                'notes' => $appointment->notes,
+                'status' => $appointment->status->value,
+            ],
+        ]);
+    }
+
+    /** @return array<string, mixed> Shared select options for the booking form. */
+    private function formOptions(): array
+    {
+        return [
             'patients' => Patient::query()->orderBy('last_name')->get(['id', 'first_name', 'last_name', 'code'])
                 ->map(fn ($p) => ['value' => $p->id, 'label' => "{$p->full_name} ({$p->code})"]),
             'services' => Service::query()->where('is_active', true)
                 ->with('category:id,name,sort_order')
-                ->get(['id', 'name', 'service_category_id', 'duration_minutes'])
+                ->get(['id', 'name', 'service_category_id', 'duration_minutes', 'default_session_count', 'default_price'])
                 ->sortBy([fn ($s) => $s->category?->sort_order ?? 999, fn ($s) => $s->name])
                 ->values()
-                ->map(fn ($s) => ['value' => $s->id, 'label' => ($s->category ? "{$s->category->name} · " : '') . $s->name, 'duration' => $s->duration_minutes]),
+                ->map(fn ($s) => [
+                    'value' => $s->id,
+                    'label' => ($s->category ? "{$s->category->name} · " : '') . $s->name,
+                    'duration' => $s->duration_minutes,
+                    'sessions' => (int) $s->default_session_count,
+                    'price' => (float) $s->default_price,
+                ]),
             'staff' => User::query()->where('is_active', true)->orderBy('name')->get(['id', 'name'])
                 ->map(fn ($u) => ['value' => $u->id, 'label' => $u->name]),
             // Active prepaid courses so a patient's ongoing package can be booked.
@@ -132,9 +190,8 @@ class AppointmentController extends Controller
                 ])
                 ->filter(fn ($c) => $c['remaining'] > 0)
                 ->values(),
-            'preselectedPatient' => $request->query('patient'),
-            'preselectedDate' => $request->query('date'),
-        ]);
+            'currency' => Settings::get('billing.currency_symbol', '₱'),
+        ];
     }
 
     public function store(Request $request, CreatePatient $createPatient): RedirectResponse
@@ -154,6 +211,9 @@ class AppointmentController extends Controller
         }
         unset($data['guest_name'], $data['guest_phone']);
 
+        $data = $this->applyServices($data);
+        $this->assertNoConflict($data);
+
         Appointment::create([
             ...$data,
             'status' => AppointmentStatus::Scheduled,
@@ -161,6 +221,32 @@ class AppointmentController extends Controller
         ]);
 
         return redirect()->route('appointments.index')->with('success', 'Appointment booked.');
+    }
+
+    /**
+     * Normalise the multi-service list and mirror the first entry into the
+     * primary service_id/course_id columns (kept for calendar/reports). Accepts
+     * a single service_id too, for backward compatibility.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function applyServices(array $data): array
+    {
+        $services = $data['services'] ?? [];
+        if (empty($services) && ! empty($data['service_id'])) {
+            $services = [['service_id' => $data['service_id'], 'course_id' => $data['course_id'] ?? null]];
+        }
+        $services = array_values(array_map(fn ($s) => [
+            'service_id' => $s['service_id'],
+            'course_id' => $s['course_id'] ?? null,
+        ], $services));
+
+        $data['services'] = $services ?: null;
+        $data['service_id'] = $services[0]['service_id'] ?? null;
+        $data['course_id'] = $services[0]['course_id'] ?? null;
+
+        return $data;
     }
 
     /** @return array{0:string, 1:string} first and last name from a full name. */
@@ -174,9 +260,83 @@ class AppointmentController extends Controller
 
     public function update(Request $request, Appointment $appointment): RedirectResponse
     {
-        $appointment->update($this->validated($request));
+        $data = $this->validated($request);
+        unset($data['guest_name'], $data['guest_phone']);
+
+        $data = $this->applyServices($data);
+        $this->assertNoConflict($data, $appointment->id);
+
+        $appointment->update($data);
 
         return redirect()->route('appointments.index')->with('success', 'Appointment updated.');
+    }
+
+    /**
+     * Reject a booking whose time range overlaps another active booking. An
+     * overlap is a clash unless the two are assigned to DIFFERENT providers
+     * (who can work in parallel). The same patient, the same provider, or any
+     * unassigned booking overlapping another always conflicts — so slots can't
+     * be silently double-booked.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertNoConflict(array $data, ?string $ignoreId = null): void
+    {
+        if (empty($data['scheduled_at'])) {
+            return;
+        }
+
+        $staffId = $data['staff_id'] ?? null;
+        $patientId = $data['patient_id'] ?? null;
+
+        $start = Carbon::parse($data['scheduled_at']);
+        $duration = (int) ($data['duration_minutes'] ?? 0);
+        if ($duration <= 0) {
+            // Sum the durations of every booked service (fallback: single primary).
+            $ids = collect($data['services'] ?? [])->pluck('service_id')->filter()->all();
+            if (empty($ids) && ! empty($data['service_id'])) {
+                $ids = [$data['service_id']];
+            }
+            $duration = (int) Service::query()->whereIn('id', $ids)->sum('duration_minutes');
+        }
+        $end = $start->copy()->addMinutes(max(5, $duration ?: 30));
+
+        $candidates = Appointment::query()
+            ->whereIn('status', [AppointmentStatus::Scheduled, AppointmentStatus::Confirmed])
+            ->whereDate('scheduled_at', $start->toDateString())
+            ->when($ignoreId, fn ($q) => $q->whereKeyNot($ignoreId))
+            ->with('staff:id,name', 'patient:id,first_name,last_name')
+            ->get();
+
+        foreach ($candidates as $c) {
+            $cStart = $c->scheduled_at;
+            $cEnd = $cStart->copy()->addMinutes((int) ($c->duration_minutes ?? 30));
+
+            // Half-open intervals overlap when each starts before the other ends.
+            if (! ($start < $cEnd && $cStart < $end)) {
+                continue;
+            }
+
+            $when = $cStart->format('g:iA') . '–' . $cEnd->format('g:iA');
+
+            if ($patientId && $c->patient_id === $patientId) {
+                throw ValidationException::withMessages([
+                    'scheduled_at' => "This patient already has an appointment {$when}. Please choose another time.",
+                ]);
+            }
+
+            // Allowed only when both sides have a provider and they differ.
+            $differentProviders = $staffId && $c->staff_id && (int) $c->staff_id !== (int) $staffId;
+            if (! $differentProviders) {
+                $who = $c->staff?->name
+                    ? "{$c->staff->name} is already booked"
+                    : "That slot overlaps an existing appointment ({$c->patient?->full_name})";
+
+                throw ValidationException::withMessages([
+                    'scheduled_at' => "{$who} {$when}. Assign different providers to run appointments together, or pick another time.",
+                ]);
+            }
+        }
     }
 
     public function updateStatus(Request $request, Appointment $appointment): RedirectResponse
@@ -185,14 +345,41 @@ class AppointmentController extends Controller
             'status' => ['required', Rule::enum(AppointmentStatus::class)],
         ]);
 
+        // Completed is reached only by checking the patient out — never by hand.
+        if ($data['status'] === AppointmentStatus::Completed->value) {
+            throw ValidationException::withMessages([
+                'status' => 'Complete an appointment by checking the patient out.',
+            ]);
+        }
+
         $appointment->update(['status' => $data['status']]);
 
         return back()->with('success', 'Appointment updated.');
     }
 
-    public function destroy(Appointment $appointment): RedirectResponse
+    public function destroy(Request $request, Appointment $appointment): RedirectResponse
     {
+        $deletePatient = $request->boolean('delete_patient');
+        $patient = $appointment->patient;
+
         $appointment->delete();
+
+        // Optionally clean up the patient too — but only if they were never a real
+        // patient (no invoices, courses, sessions, or any other appointment).
+        if ($deletePatient && $patient) {
+            $hasOtherRecords = $patient->invoices()->exists()
+                || $patient->treatmentCourses()->exists()
+                || $patient->treatmentSessions()->exists()
+                || Appointment::query()->where('patient_id', $patient->id)->exists();
+
+            if (! $hasOtherRecords) {
+                $patient->delete();
+
+                return back()->with('success', 'Appointment and patient removed.');
+            }
+
+            return back()->with('success', 'Appointment removed. Patient kept — they have other records.');
+        }
 
         return back()->with('success', 'Appointment removed.');
     }
@@ -206,6 +393,9 @@ class AppointmentController extends Controller
             'guest_phone' => ['nullable', 'string', 'max:50'],
             'service_id' => ['nullable', 'string', 'exists:services,id'],
             'course_id' => ['nullable', 'string', 'exists:treatment_courses,id'],
+            'services' => ['array'],
+            'services.*.service_id' => ['required', 'string', 'exists:services,id'],
+            'services.*.course_id' => ['nullable', 'string', 'exists:treatment_courses,id'],
             'staff_id' => ['nullable', 'integer', 'exists:users,id'],
             'scheduled_at' => ['required', 'date'],
             'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:600'],

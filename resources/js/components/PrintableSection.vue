@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Printer } from '@lucide/vue';
+import { Printer, Download } from '@lucide/vue';
 import { usePrint } from '@/lib/print';
+import { downloadElementPdf, pdfDateStamp } from '@/lib/pdf';
 
 const props = defineProps<{
     sectionKey: string;
@@ -14,6 +15,17 @@ const props = defineProps<{
 
 const { activeSection, printSection } = usePrint();
 
+const cardEl = ref<{ $el: HTMLElement } | null>(null);
+const downloading = ref(false);
+const downloadPdf = async () => {
+    downloading.value = true;
+    try {
+        await downloadElementPdf(cardEl.value?.$el, [props.meta.clinic, props.title, pdfDateStamp()]);
+    } finally {
+        downloading.value = false;
+    }
+};
+
 // Hidden from the printout when a *different* section is being printed alone.
 const hidden = computed(() => activeSection.value !== null && activeSection.value !== props.sectionKey);
 // This section is the sole print target → show its standalone report header.
@@ -21,7 +33,7 @@ const soleTarget = computed(() => activeSection.value === props.sectionKey);
 </script>
 
 <template>
-    <Card :class="{ 'print-hidden': hidden }">
+    <Card ref="cardEl" :class="{ 'print-hidden': hidden }">
         <!-- Standalone report header (only when this list is printed by itself) -->
         <div v-if="soleTarget" class="print-only border-b px-6 pb-3 pt-4">
             <h1 class="text-lg font-bold">{{ meta.clinic || 'Clinic' }}</h1>
@@ -34,9 +46,14 @@ const soleTarget = computed(() => activeSection.value === props.sectionKey);
                 <CardTitle class="text-base">{{ title }}</CardTitle>
                 <p v-if="subtitle" class="text-xs text-muted-foreground no-print">{{ subtitle }}</p>
             </div>
-            <Button variant="outline" size="sm" class="no-print" @click="printSection(sectionKey)">
-                <Printer class="mr-1.5 size-4" /> Print
-            </Button>
+            <div class="flex items-center gap-2 no-print">
+                <Button variant="outline" size="sm" :disabled="downloading" @click="downloadPdf">
+                    <Download class="mr-1.5 size-4" /> {{ downloading ? 'Preparing…' : 'PDF' }}
+                </Button>
+                <Button variant="outline" size="sm" @click="printSection(sectionKey)">
+                    <Printer class="mr-1.5 size-4" /> Print
+                </Button>
+            </div>
         </CardHeader>
 
         <CardContent class="p-0">

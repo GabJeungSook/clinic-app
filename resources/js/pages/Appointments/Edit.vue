@@ -9,7 +9,7 @@ import InputError from '@/components/InputError.vue';
 import SearchSelect from '@/components/SearchSelect.vue';
 import { Plus, Trash2 } from '@lucide/vue';
 
-defineOptions({ layout: { breadcrumbs: [{ title: 'Appointments', href: '/appointments' }, { title: 'Book', href: '#' }] } });
+defineOptions({ layout: { breadcrumbs: [{ title: 'Appointments', href: '/appointments' }, { title: 'Edit', href: '#' }] } });
 
 interface ServiceOpt { value: string; label: string; duration: number | null; sessions: number; price: number }
 interface CourseOpt { value: string; patient_id: string; service_id: string; label: string; remaining: number }
@@ -21,23 +21,38 @@ const props = defineProps<{
     staff: Array<{ value: string; label: string }>;
     courses: CourseOpt[];
     currency: string;
-    preselectedPatient: string | null;
-    preselectedDate: string | null;
+    appointment: {
+        id: string;
+        name: string;
+        patient_id: string | null;
+        service_id: string | null;
+        course_id: string | null;
+        services: Array<{ service_id: string; course_id: string | null }>;
+        staff_id: number | null;
+        scheduled_at: string | null;
+        duration_minutes: number | null;
+        notes: string | null;
+        status: string;
+    };
 }>();
 
+const a = props.appointment;
+const initialServices: Row[] = a.services.length
+    ? a.services.map((s) => ({ service_id: s.service_id, course_id: s.course_id ?? '' }))
+    : a.service_id
+        ? [{ service_id: a.service_id, course_id: a.course_id ?? '' }]
+        : [{ service_id: '', course_id: '' }];
+
 const form = useForm({
-    patient_id: props.preselectedPatient ?? '',
-    guest_name: '',
-    guest_phone: '',
-    services: [{ service_id: '', course_id: '' }] as Row[],
-    staff_id: '' as number | '',
-    scheduled_at: props.preselectedDate ? `${props.preselectedDate}T09:00` : '',
-    duration_minutes: null as number | null,
-    notes: '',
+    patient_id: a.patient_id ?? '',
+    services: initialServices,
+    staff_id: a.staff_id ?? ('' as number | ''),
+    scheduled_at: a.scheduled_at ?? '',
+    duration_minutes: a.duration_minutes,
+    notes: a.notes ?? '',
 });
 
 const money = (n: number) => `${props.currency}${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const isGuest = computed(() => !form.patient_id);
 const servicesById = computed(() => Object.fromEntries(props.services.map((s) => [s.value, s])));
 const svc = (row: Row): ServiceOpt | undefined => servicesById.value[row.service_id];
 const courseFor = (row: Row): CourseOpt | undefined =>
@@ -47,7 +62,6 @@ const addRow = () => form.services.push({ service_id: '', course_id: '' });
 const removeRow = (i: number) => form.services.splice(i, 1);
 
 function onServiceChange(row: Row) {
-    // Auto-draw from an active package for this service when the patient has one.
     const c = courseFor(row);
     row.course_id = c ? c.value : '';
     recomputeDuration();
@@ -56,7 +70,6 @@ function recomputeDuration() {
     const total = form.services.reduce((sum, r) => sum + (svc(r)?.duration ?? 0), 0);
     if (total > 0) form.duration_minutes = total;
 }
-// Re-evaluate package links if the patient changes.
 watch(() => form.patient_id, () => form.services.forEach((r) => { r.course_id = courseFor(r)?.value ?? ''; }));
 
 const total = computed(() =>
@@ -67,35 +80,23 @@ const submit = () =>
     form.transform((data) => ({
         ...data,
         services: data.services.filter((r) => r.service_id).map((r) => ({ service_id: r.service_id, course_id: r.course_id || null })),
-    })).post('/appointments');
+    })).put(`/appointments/${a.id}`);
 </script>
 
 <template>
-    <Head title="Book appointment" />
+    <Head title="Edit appointment" />
     <div class=" w-full p-4 md:p-6">
         <Card>
-            <CardHeader><CardTitle>Book an appointment</CardTitle></CardHeader>
+            <CardHeader>
+                <CardTitle>Edit appointment</CardTitle>
+                <p class="text-sm text-muted-foreground">Reschedule or update {{ a.name }}'s booking.</p>
+            </CardHeader>
             <CardContent>
                 <form class="grid gap-4" @submit.prevent="submit">
                     <div class="grid gap-1.5">
                         <Label>Patient</Label>
-                        <SearchSelect v-model="form.patient_id" :options="patients" placeholder="— New patient (quick add) —" empty-label="— New patient (quick add) —" />
+                        <SearchSelect v-model="form.patient_id" :options="patients" />
                         <InputError :message="form.errors.patient_id" />
-                    </div>
-
-                    <div v-if="isGuest" class="grid gap-4 rounded-lg border border-dashed p-3 sm:grid-cols-2">
-                        <div class="grid gap-1.5 sm:col-span-2">
-                            <p class="text-xs text-muted-foreground">A patient record will be created for this booking so you can chart and check them out later.</p>
-                        </div>
-                        <div class="grid gap-1.5">
-                            <Label>Full name *</Label>
-                            <Input v-model="form.guest_name" placeholder="First Last" />
-                            <InputError :message="form.errors.guest_name" />
-                        </div>
-                        <div class="grid gap-1.5">
-                            <Label>Contact number</Label>
-                            <Input v-model="form.guest_phone" />
-                        </div>
                     </div>
 
                     <!-- Services -->
@@ -121,7 +122,6 @@ const submit = () =>
                             <span class="text-muted-foreground">{{ chosen.length }} service{{ chosen.length === 1 ? '' : 's' }} · total</span>
                             <span class="font-semibold">{{ money(total) }}</span>
                         </div>
-                        <p class="text-xs text-muted-foreground">Prices are estimates for the visit — the final bill is taken at checkout. Package sessions are ₱0.</p>
                     </div>
 
                     <div class="grid gap-4 sm:grid-cols-2">
@@ -148,7 +148,7 @@ const submit = () =>
 
                     <div class="flex justify-end gap-2">
                         <Button as-child variant="ghost"><Link href="/appointments">Cancel</Link></Button>
-                        <Button type="submit" :disabled="form.processing || !form.scheduled_at">Book appointment</Button>
+                        <Button type="submit" :disabled="form.processing || !form.scheduled_at">Save changes</Button>
                     </div>
                 </form>
             </CardContent>

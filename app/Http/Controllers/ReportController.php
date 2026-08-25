@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AppointmentStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\PurchaseStatus;
 use App\Enums\SessionStatus;
@@ -111,6 +112,100 @@ class ReportController extends Controller
                 'net' => round($gross - $refunds, 2),
                 'count' => $payments->where('amount', '>', 0)->count(),
             ],
+        ]);
+    }
+
+    public function sales(Request $request): Response
+    {
+        // Invoice-based (accrual) sales with a full breakdown — every billed sale
+        // in the period, its money split, and what was sold. Voided/draft excluded.
+        $preset = (string) $request->query('preset', 'month');
+
+        [$from, $to] = match ($preset) {
+            'today' => [Carbon::today()->startOfDay(), Carbon::today()->endOfDay()],
+            'week' => [Carbon::today()->startOfWeek(), Carbon::today()->endOfWeek()],
+            'year' => [Carbon::today()->startOfYear(), Carbon::today()->endOfYear()],
+            'custom' => [
+                ($request->date('from') ?? Carbon::today()->subDays(29))->startOfDay(),
+                ($request->date('to') ?? Carbon::today())->endOfDay(),
+            ],
+            default => [Carbon::today()->startOfMonth(), Carbon::today()->endOfMonth()],
+        };
+
+        $invoices = Invoice::query()
+            ->whereBetween('issued_at', [$from, $to])
+            ->whereNotIn('status', [InvoiceStatus::Void, InvoiceStatus::Draft])
+            ->with('patient:id,first_name,last_name', 'items', 'payments')
+            ->orderByDesc('issued_at')
+            ->get();
+
+        $payments = $invoices->flatMap->payments;
+
+        $byStatus = $invoices->groupBy(fn (Invoice $i) => $i->status->value)
+            ->map(fn ($rows, $status) => [
+                'label' => ucwords(str_replace('_', ' ', $status)),
+                'count' => $rows->count(),
+                'total' => (float) $rows->sum(fn ($i) => (float) $i->grand_total),
+            ])
+            ->sortByDesc('total')
+            ->values();
+
+        $byMethod = collect(PaymentMethod::cases())
+            ->map(fn ($m) => ['label' => $m->label(), 'value' => (float) $payments->where('method', $m)->sum('amount')])
+            ->filter(fn ($r) => $r['value'] != 0.0)
+            ->values();
+
+        $itemsSold = $invoices->flatMap->items
+            ->groupBy('description_snapshot')
+            ->map(fn ($rows, $name) => [
+                'label' => (string) $name,
+                'qty' => (float) $rows->sum(fn ($i) => (float) $i->quantity),
+                'total' => (float) $rows->sum(fn ($i) => (float) $i->line_total),
+            ])
+            ->sortByDesc('total')
+            ->values();
+
+        return Inertia::render('Reports/Sales', [
+            'meta' => $this->meta(),
+            'preset' => $preset,
+            'range' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'label' => $from->format('F j, Y') . ' – ' . $to->format('F j, Y'),
+            ],
+            'presets' => [
+                ['value' => 'today', 'label' => 'Today'],
+                ['value' => 'week', 'label' => 'This week'],
+                ['value' => 'month', 'label' => 'This month'],
+                ['value' => 'year', 'label' => 'This year'],
+                ['value' => 'custom', 'label' => 'Custom range'],
+            ],
+            'totals' => [
+                'count' => $invoices->count(),
+                'subtotal' => (float) $invoices->sum(fn ($i) => (float) $i->subtotal),
+                'discount' => (float) $invoices->sum(fn ($i) => (float) $i->discount_total),
+                'tax' => (float) $invoices->sum(fn ($i) => (float) $i->tax_total),
+                'grand' => (float) $invoices->sum(fn ($i) => (float) $i->grand_total),
+                'collected' => (float) $invoices->sum(fn ($i) => (float) $i->amount_paid),
+                'outstanding' => (float) $invoices->sum(fn ($i) => $i->amountDue()),
+            ],
+            'byStatus' => $byStatus,
+            'byMethod' => $byMethod,
+            'itemsSold' => $itemsSold,
+            'ledger' => $invoices->map(fn (Invoice $i) => [
+                'issued_at' => $i->issued_at?->format('F j, Y g:iA'),
+                'invoice_no' => $i->invoice_no,
+                'patient' => $i->patient?->full_name,
+                'status' => ucwords(str_replace('_', ' ', $i->status->value)),
+                'items' => $i->items->count(),
+                'subtotal' => (float) $i->subtotal,
+                'discount' => (float) $i->discount_total,
+                'tax' => (float) $i->tax_total,
+                'grand' => (float) $i->grand_total,
+                'paid' => (float) $i->amount_paid,
+                'due' => $i->amountDue(),
+                'methods' => $i->payments->where('amount', '>', 0)->map(fn ($p) => $p->method->label())->unique()->values()->all(),
+            ]),
         ]);
     }
 

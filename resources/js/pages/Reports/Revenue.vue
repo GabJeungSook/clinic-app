@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import AreaChart from '@/components/charts/AreaChart.vue';
 import ReportShell from '@/components/ReportShell.vue';
 
-defineOptions({ layout: { breadcrumbs: [{ title: 'Reports', href: '/reports/revenue' }, { title: 'Sales', href: '#' }] } });
+defineOptions({ layout: { breadcrumbs: [{ title: 'Reports', href: '/reports/revenue' }, { title: 'Revenue', href: '#' }] } });
 
 const props = defineProps<{
     meta: { clinic: string | null; generated_at: string; currency: string };
@@ -31,8 +31,8 @@ const applyCustom = () => router.get('/reports/revenue', { preset: 'custom', fro
 </script>
 
 <template>
-    <Head title="Sales report" />
-    <ReportShell title="Sales report" :subtitle="range.label" :meta="meta">
+    <Head title="Revenue report" />
+    <ReportShell title="Revenue report" :subtitle="range.label" :meta="meta">
         <!-- Period filter (screen only) -->
         <div class="no-print flex flex-col gap-3 rounded-lg border bg-muted/30 p-3">
             <div class="flex flex-wrap gap-1">

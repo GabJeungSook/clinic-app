@@ -105,11 +105,13 @@ class CheckoutTest extends TestCase
         ]);
         $patient = Patient::query()->create(['code' => 'P-PKG', 'first_name' => 'Pkg', 'last_name' => 'Test']);
 
+        // Prepay 6 sessions at ₱3,000 each → a package of 6 (1 performed, 5 left).
         $this->actingAs($this->owner)->post('/checkout', [
             'patient_id' => $patient->id,
             'line_groups' => ['services' => [[
                 'service_id' => $service->id,
-                'price' => 18000,
+                'sessions' => 6,
+                'price' => 3000,
                 'consumables' => [],
             ]]],
             'payments' => [['method' => 'cash', 'amount' => 18000]],
@@ -123,6 +125,62 @@ class CheckoutTest extends TestCase
         $invoice = Invoice::query()->where('patient_id', $patient->id)->latest('created_at')->firstOrFail();
         $this->assertSame('paid', $invoice->status->value);
         $this->assertEqualsWithDelta(18000.0, (float) $invoice->grand_total, 0.001);
+    }
+
+    public function test_prepaying_two_sessions_leaves_one_as_credit(): void
+    {
+        $service = Service::query()->create([
+            'name' => 'Per-session Facial (Test)',
+            'default_session_count' => 6,
+            'default_price' => 30000,        // ₱5,000 / session
+        ]);
+        $patient = Patient::query()->create(['code' => 'P-ADV', 'first_name' => 'Adv', 'last_name' => 'Test']);
+
+        // Pay 2 sessions in advance at ₱5,000 each.
+        $this->actingAs($this->owner)->post('/checkout', [
+            'patient_id' => $patient->id,
+            'line_groups' => ['services' => [[
+                'service_id' => $service->id,
+                'sessions' => 2,
+                'price' => 5000,
+                'consumables' => [],
+            ]]],
+            'payments' => [['method' => 'cash', 'amount' => 10000]],
+        ])->assertRedirect();
+
+        $course = TreatmentCourse::query()->where('patient_id', $patient->id)->firstOrFail();
+        $this->assertSame(2, $course->total_sessions);
+        $this->assertSame(1, $course->sessions_completed);   // performed today
+        $this->assertSame(1, $course->sessions_remaining);   // prepaid credit
+
+        $invoice = Invoice::query()->where('patient_id', $patient->id)->latest('created_at')->firstOrFail();
+        $this->assertEqualsWithDelta(10000.0, (float) $invoice->grand_total, 0.001);
+    }
+
+    public function test_single_session_checkout_creates_no_package(): void
+    {
+        $service = Service::query()->create([
+            'name' => 'Single Facial (Test)',
+            'default_session_count' => 6,
+            'default_price' => 30000,
+        ]);
+        $patient = Patient::query()->create(['code' => 'P-ONE', 'first_name' => 'One', 'last_name' => 'Test']);
+
+        $this->actingAs($this->owner)->post('/checkout', [
+            'patient_id' => $patient->id,
+            'line_groups' => ['services' => [[
+                'service_id' => $service->id,
+                'sessions' => 1,
+                'price' => 5000,
+                'consumables' => [],
+            ]]],
+            'payments' => [['method' => 'cash', 'amount' => 5000]],
+        ])->assertRedirect();
+
+        $this->assertSame(0, TreatmentCourse::query()->where('patient_id', $patient->id)->count());
+
+        $invoice = Invoice::query()->where('patient_id', $patient->id)->latest('created_at')->firstOrFail();
+        $this->assertEqualsWithDelta(5000.0, (float) $invoice->grand_total, 0.001);
     }
 
     public function test_retail_line_deducts_stock_as_sale(): void

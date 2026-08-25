@@ -38,7 +38,9 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
+            // A busy timeout lets a reader (the database session driver) and a
+            // writer wait for each other instead of erroring immediately.
+            'busy_timeout' => 5000,
             'journal_mode' => null,
             'synchronous' => null,
             'transaction_mode' => 'DEFERRED',

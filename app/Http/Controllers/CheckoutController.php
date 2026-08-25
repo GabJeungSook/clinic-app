@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Actions\Billing\Checkout;
 use App\Actions\Patients\CreatePatient;
+use App\Enums\AppointmentStatus;
 use App\Enums\CourseStatus;
 use App\Enums\PaymentMethod;
 use App\Exceptions\InsufficientStockException;
+use App\Models\Appointment;
 use App\Models\InventoryItem;
 use App\Models\Patient;
 use App\Models\Promotion;
@@ -16,6 +18,7 @@ use App\Models\Unit;
 use App\Support\Settings\Settings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -43,7 +46,8 @@ class CheckoutController extends Controller
             ->map(fn (Service $s) => [
                 'value' => $s->id,
                 'label' => ($s->category ? "{$s->category->name} · " : '') . $s->name,
-                'price' => (float) $s->default_price,
+                // Per-session price so the checkout bills one session by default.
+                'price' => round((float) $s->default_price / max(1, (int) $s->default_session_count), 2),
                 'sessions' => (int) $s->default_session_count,
                 'bom' => $s->consumables->map(fn ($c) => [
                     'inventory_item_id' => $c->inventory_item_id,
@@ -111,6 +115,24 @@ class CheckoutController extends Controller
             'preselectedPatient' => $request->query('patient'),
             'preselectedService' => $request->query('service'),
             'preselectedCourse' => $request->query('course'),
+            // Bookings the patient came in for, keyed by patient, so selecting them
+            // at checkout auto-loads the service(s): any Confirmed booking (they've
+            // arrived — regardless of the booked date) plus today's Scheduled ones.
+            'appointmentPrefills' => Appointment::query()
+                ->whereNotNull('patient_id')
+                ->where(fn ($q) => $q
+                    ->where('status', AppointmentStatus::Confirmed)
+                    ->orWhere(fn ($s) => $s->where('status', AppointmentStatus::Scheduled)->whereDate('scheduled_at', Carbon::today())))
+                ->get(['patient_id', 'service_id', 'course_id', 'services'])
+                ->groupBy('patient_id')
+                ->map(fn ($appts) => $appts->flatMap(function (Appointment $a) {
+                    $list = collect($a->services ?? []);
+                    if ($list->isEmpty() && $a->service_id) {
+                        $list = collect([['service_id' => $a->service_id, 'course_id' => $a->course_id]]);
+                    }
+
+                    return $list->map(fn ($s) => ['service_id' => $s['service_id'], 'course_id' => $s['course_id'] ?? null]);
+                })->values()),
         ]);
     }
 
@@ -142,6 +164,7 @@ class CheckoutController extends Controller
             'line_groups.services' => ['array'],
             'line_groups.services.*.service_id' => ['required', 'string', 'exists:services,id'],
             'line_groups.services.*.course_id' => ['nullable', 'string', 'exists:treatment_courses,id'],
+            'line_groups.services.*.sessions' => ['nullable', 'integer', 'min:1', 'max:100'],
             'line_groups.services.*.price' => ['required', 'numeric', 'min:0'],
             'line_groups.services.*.discount' => ['nullable', 'numeric', 'min:0'],
             'line_groups.services.*.promotion_id' => ['nullable', 'string', 'exists:promotions,id'],
@@ -220,6 +243,27 @@ class CheckoutController extends Controller
             );
         } catch (InsufficientStockException $e) {
             throw ValidationException::withMessages(['line_groups' => $e->getMessage()]);
+        }
+
+        // Checking a patient out fulfils their booking: complete today's
+        // scheduled/confirmed appointment(s) that share any of the services sold.
+        if ($patientId && ! empty($services)) {
+            $serviceIds = array_values(array_filter(array_map(fn ($s) => $s['service_id'] ?? null, $services)));
+            if (! empty($serviceIds)) {
+                Appointment::query()
+                    ->where('patient_id', $patientId)
+                    ->where(fn ($q) => $q
+                        ->where('status', AppointmentStatus::Confirmed)
+                        ->orWhere(fn ($s) => $s->where('status', AppointmentStatus::Scheduled)->whereDate('scheduled_at', Carbon::today())))
+                    ->get()
+                    ->each(function (Appointment $appt) use ($serviceIds) {
+                        $apptServiceIds = collect($appt->services ?? [])->pluck('service_id')
+                            ->push($appt->service_id)->filter()->all();
+                        if (array_intersect($serviceIds, $apptServiceIds)) {
+                            $appt->update(['status' => AppointmentStatus::Completed]);
+                        }
+                    });
+            }
         }
 
         if ($result['receipt']) {

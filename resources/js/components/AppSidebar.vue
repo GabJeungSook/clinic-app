@@ -31,28 +31,50 @@ import { dashboard } from '@/routes';
 import type { NavItem } from '@/types';
 
 type GatedNavItem = NavItem & { permission?: string };
+type NavGroup = { label?: string; items: GatedNavItem[] };
 
-const allNavItems: GatedNavItem[] = [
-    { title: 'Dashboard', href: dashboard(), icon: LayoutGrid },
-    { title: 'Appointments', href: '/appointments', icon: CalendarDays, permission: 'appointments.view' },
-    { title: 'Checkout', href: '/checkout', icon: CreditCard, permission: 'pos.use' },
-    { title: 'Patients', href: '/patients', icon: Users, permission: 'patients.view' },
-    { title: 'Services', href: '/services', icon: Sparkles, permission: 'services.manage' },
-    { title: 'Treatments', href: '/treatments', icon: Syringe, permission: 'treatments.view' },
-    { title: 'Inventory', href: '/inventory', icon: Package, permission: 'inventory.view' },
-    { title: 'Purchasing', href: '/purchases', icon: ShoppingCart, permission: 'purchasing.view' },
-    { title: 'Billing', href: '/invoices', icon: Receipt, permission: 'billing.view' },
-    { title: 'Reports', href: '/reports/revenue', icon: ChartColumn, permission: 'reports.view' },
-    { title: 'Staff', href: '/users', icon: UserCog, permission: 'users.manage' },
-    { title: 'Settings', href: '/clinic-settings', icon: Settings, permission: 'settings.manage' },
+// Grouped navigation — operational items first, admin at the bottom.
+const navGroups: NavGroup[] = [
+    {
+        label: 'Menu',
+        items: [
+            { title: 'Dashboard', href: dashboard(), icon: LayoutGrid },
+            { title: 'Appointments', href: '/appointments', icon: CalendarDays, permission: 'appointments.view' },
+            { title: 'Checkout', href: '/checkout', icon: CreditCard, permission: 'pos.use' },
+            { title: 'Patients', href: '/patients', icon: Users, permission: 'patients.view' },
+            { title: 'Services', href: '/services', icon: Sparkles, permission: 'services.manage' },
+            { title: 'Treatments', href: '/treatments', icon: Syringe, permission: 'treatments.view' },
+        ],
+    },
+    {
+        label: 'Operations',
+        items: [
+            { title: 'Inventory', href: '/inventory', icon: Package, permission: 'inventory.view' },
+            { title: 'Purchasing', href: '/purchases', icon: ShoppingCart, permission: 'purchasing.view' },
+            { title: 'Billing', href: '/invoices', icon: Receipt, permission: 'billing.view' },
+            { title: 'Reports', href: '/reports/revenue', icon: ChartColumn, permission: 'reports.view' },
+        ],
+    },
+    {
+        label: 'Setting',
+        items: [
+            { title: 'Staff', href: '/users', icon: UserCog, permission: 'users.manage' },
+            { title: 'Settings', href: '/clinic-settings', icon: Settings, permission: 'settings.manage' },
+        ],
+    },
 ];
 
 const permissions = computed<string[]>(
     () => ((usePage().props.auth as { permissions?: string[] })?.permissions) ?? [],
 );
 
-const mainNavItems = computed<NavItem[]>(() =>
-    allNavItems.filter((i) => !i.permission || permissions.value.includes(i.permission)),
+const visibleGroups = computed(() =>
+    navGroups
+        .map((group) => ({
+            label: group.label,
+            items: group.items.filter((i) => !i.permission || permissions.value.includes(i.permission)),
+        }))
+        .filter((group) => group.items.length > 0),
 );
 </script>
 
@@ -61,7 +83,7 @@ const mainNavItems = computed<NavItem[]>(() =>
         <SidebarHeader>
             <SidebarMenu>
                 <SidebarMenuItem>
-                    <SidebarMenuButton size="lg" as-child>
+                    <SidebarMenuButton size="lg" as-child class="hover:bg-transparent active:bg-transparent">
                         <Link :href="dashboard()">
                             <AppLogo />
                         </Link>
@@ -70,8 +92,8 @@ const mainNavItems = computed<NavItem[]>(() =>
             </SidebarMenu>
         </SidebarHeader>
 
-        <SidebarContent>
-            <NavMain :items="mainNavItems" />
+        <SidebarContent class="gap-4">
+            <NavMain v-for="group in visibleGroups" :key="group.label" :label="group.label" :items="group.items" />
         </SidebarContent>
 
         <SidebarFooter>

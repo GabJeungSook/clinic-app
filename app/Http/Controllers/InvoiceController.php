@@ -4,11 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Actions\Billing\GenerateReceipt;
 use App\Actions\Billing\RecordPayment;
+use App\Actions\Billing\RefundInvoice;
+use App\Actions\Billing\VoidInvoice;
 use App\Enums\PaymentMethod;
 use App\Models\Invoice;
 use App\Support\Settings\Settings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -44,9 +47,9 @@ class InvoiceController extends Controller
         ]);
     }
 
-    public function show(Invoice $invoice): Response
+    public function show(Request $request, Invoice $invoice): Response
     {
-        $invoice->load('patient:id,first_name,last_name', 'items', 'payments.receiver:id,name', 'receipts');
+        $invoice->load('patient:id,first_name,last_name', 'items', 'payments.receiver:id,name', 'receipts', 'voider:id,name');
 
         return Inertia::render('Billing/Show', [
             'invoice' => [
@@ -64,7 +67,11 @@ class InvoiceController extends Controller
                 'tax_rate' => (float) $invoice->tax_rate_snapshot,
                 'notes' => $invoice->notes,
                 'issued_at' => $invoice->issued_at?->toDateString(),
+                'void_reason' => $invoice->void_reason,
+                'voided_at' => $invoice->voided_at?->toDateTimeString(),
+                'voided_by' => $invoice->voider?->name,
             ],
+            'can' => ['manage' => (bool) $request->user()?->can('billing.manage')],
             'items' => $invoice->items->map(fn ($i) => [
                 'description' => $i->description_snapshot,
                 'quantity' => (float) $i->quantity,
@@ -102,6 +109,38 @@ class InvoiceController extends Controller
         );
 
         return back()->with('success', 'Payment recorded.');
+    }
+
+    public function void(Request $request, Invoice $invoice, VoidInvoice $void): RedirectResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:255'],
+        ]);
+
+        $void->handle($invoice, $data['reason'], voidedBy: $request->user()?->id);
+
+        return back()->with('success', 'Invoice voided.');
+    }
+
+    public function refund(Request $request, Invoice $invoice, RefundInvoice $refund): RedirectResponse
+    {
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01'],
+            'method' => ['required', Rule::enum(PaymentMethod::class)],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'restock' => ['boolean'],
+        ]);
+
+        $refund->handle(
+            $invoice,
+            (float) $data['amount'],
+            PaymentMethod::from($data['method']),
+            reason: $data['reason'] ?? null,
+            restock: (bool) ($data['restock'] ?? false),
+            performedBy: $request->user()?->id,
+        );
+
+        return back()->with('success', 'Refund recorded.');
     }
 
     public function generateReceipt(Invoice $invoice, GenerateReceipt $generate): RedirectResponse

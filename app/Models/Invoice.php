@@ -59,6 +59,11 @@ class Invoice extends Model implements Auditable
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function voider(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by');
+    }
+
     public function amountDue(): float
     {
         return round((float) $this->grand_total - (float) $this->amount_paid, 2);

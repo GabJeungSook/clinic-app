@@ -258,6 +258,42 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Sign-in panel motif — sparse, slow-floating lotus-petal/leaf shapes (an
+   organic nod to the logo mark, deliberately NOT plain circles). Kept to the
+   edges so it never sits behind the form, and very low-contrast so it reads as
+   texture, not decoration competing for attention.
+--------------------------------------------------------------------------- */
+.petal-field {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.petal {
+    position: absolute;
+    border-radius: 0 100% 0 100%;      /* leaf / petal silhouette */
+    border: 1.5px solid hsl(330 45% 55% / 0.14);
+    will-change: transform;
+    animation: petal-float 16s ease-in-out infinite;
+}
+.petal--fill {
+    background: hsl(330 55% 62% / 0.05);
+    border-color: transparent;
+}
+.petal--1 { width: 9rem;   height: 9rem;   top: 6%;     left: 5%;  --r: 18deg;   animation-duration: 18s; }
+.petal--2 { width: 5rem;   height: 5rem;   top: 15%;    right: 7%; --r: -40deg;  animation-duration: 13s; animation-delay: -3s; }
+.petal--3 { width: 12rem;  height: 12rem;  bottom: 9%;  left: 6%;  --r: 125deg;  animation-duration: 22s; animation-delay: -7s; }
+.petal--4 { width: 6.5rem; height: 6.5rem; bottom: 16%; right: 5%; --r: 205deg;  animation-duration: 15s; animation-delay: -2s; }
+.petal--5 { width: 3.5rem; height: 3.5rem; top: 46%;    right: 3%; --r: 65deg;   animation-duration: 12s; animation-delay: -5s; }
+@keyframes petal-float {
+    0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+    50% { transform: translateY(-20px) rotate(calc(var(--r, 0deg) + 8deg)); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .petal { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
    Print / Save-as-PDF: show only the .printable region, hide app chrome.
 --------------------------------------------------------------------------- */
 .print-only {

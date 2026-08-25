@@ -55,6 +55,7 @@ class ModulePagesTest extends TestCase
             ['/checkout', 'Checkout/Create'],
             ['/promotions', 'Billing/Promotions'],
             ['/reports/revenue', 'Reports/Revenue'],
+            ['/reports/sales', 'Reports/Sales'],
             ['/reports/appointments', 'Reports/Appointments'],
             ['/reports/patients', 'Reports/Patients'],
             ['/reports/inventory', 'Reports/Inventory'],
@@ -180,6 +181,183 @@ class ModulePagesTest extends TestCase
         $this->post("/appointments/{$appointment->id}/status", ['status' => 'confirmed'])
             ->assertRedirect();
         $this->assertSame('confirmed', $appointment->fresh()->status->value);
+    }
+
+    public function test_checkout_prefills_services_from_todays_appointment(): void
+    {
+        $patient = Patient::create(['code' => 'PF-9001', 'first_name' => 'Prefill', 'last_name' => 'Tester']);
+        $service = Service::query()->firstOrFail();
+        \App\Models\Appointment::create([
+            'patient_id' => $patient->id,
+            'service_id' => $service->id,
+            'services' => [['service_id' => $service->id, 'course_id' => null]],
+            'scheduled_at' => now()->setTime(9, 0),
+            'status' => 'confirmed',
+        ]);
+
+        $this->get('/checkout')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Checkout/Create')
+                ->has("appointmentPrefills.{$patient->id}", 1)
+                ->where("appointmentPrefills.{$patient->id}.0.service_id", $service->id));
+    }
+
+    public function test_checkout_prefills_from_a_confirmed_appointment_regardless_of_date(): void
+    {
+        $patient = Patient::create(['code' => 'PF-9002', 'first_name' => 'Confirmed', 'last_name' => 'Future']);
+        $service = Service::query()->firstOrFail();
+        \App\Models\Appointment::create([
+            'patient_id' => $patient->id,
+            'service_id' => $service->id,
+            'services' => [['service_id' => $service->id, 'course_id' => null]],
+            'scheduled_at' => now()->addDays(3)->setTime(9, 0),   // future date
+            'status' => 'confirmed',                              // but the patient is here
+        ]);
+
+        $this->get('/checkout')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Checkout/Create')
+                ->where("appointmentPrefills.{$patient->id}.0.service_id", $service->id));
+    }
+
+    public function test_appointment_can_be_booked_with_multiple_services(): void
+    {
+        $patient = Patient::query()->firstOrFail();
+        $s1 = Service::query()->firstOrFail();
+        $s2 = Service::query()->whereKeyNot($s1->id)->firstOrFail();
+
+        $this->post('/appointments', [
+            'patient_id' => $patient->id,
+            'services' => [
+                ['service_id' => $s1->id],
+                ['service_id' => $s2->id],
+            ],
+            'scheduled_at' => now()->addDays(95)->setTime(9, 0)->format('Y-m-d\TH:i'),
+        ])->assertRedirect();
+
+        $appt = \App\Models\Appointment::query()->orderByDesc('id')->firstOrFail();
+        $this->assertCount(2, $appt->services);
+        $this->assertSame($s1->id, $appt->service_id);   // primary mirrors the first service
+    }
+
+    public function test_appointment_can_be_edited_and_rescheduled(): void
+    {
+        $patient = Patient::query()->firstOrFail();
+        $service = Service::query()->firstOrFail();
+        $appt = \App\Models\Appointment::create([
+            'patient_id' => $patient->id,
+            'service_id' => $service->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => now()->addDays(90)->setTime(10, 0),
+            'duration_minutes' => 30,
+            'status' => 'scheduled',
+        ]);
+
+        $this->get("/appointments/{$appt->id}/edit")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Appointments/Edit')->where('appointment.id', $appt->id));
+
+        $newTime = now()->addDays(91)->setTime(14, 0);
+        $this->put("/appointments/{$appt->id}", [
+            'patient_id' => $patient->id,
+            'service_id' => $service->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => $newTime->format('Y-m-d\TH:i'),
+            'duration_minutes' => 45,
+        ])->assertRedirect();
+
+        $appt->refresh();
+        $this->assertSame(45, (int) $appt->duration_minutes);
+        $this->assertSame($newTime->format('Y-m-d H:i'), $appt->scheduled_at->format('Y-m-d H:i'));
+    }
+
+    public function test_overlapping_appointment_for_same_provider_is_rejected(): void
+    {
+        $patient = Patient::query()->firstOrFail();
+        $other = Patient::query()->whereKeyNot($patient->id)->firstOrFail();
+        $service = Service::query()->firstOrFail();
+        $at = now()->addDays(90)->setTime(10, 0);
+
+        \App\Models\Appointment::create([
+            'patient_id' => $patient->id,
+            'service_id' => $service->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => $at,
+            'duration_minutes' => 60,          // 10:00–11:00
+            'status' => 'scheduled',
+        ]);
+
+        // Same provider, overlapping (10:30) → rejected.
+        $this->post('/appointments', [
+            'patient_id' => $other->id,
+            'service_id' => $service->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => $at->addMinutes(30)->format('Y-m-d\TH:i'),
+            'duration_minutes' => 30,
+        ])->assertSessionHasErrors('scheduled_at');
+
+        // A clear slot (11:30) is accepted.
+        $this->post('/appointments', [
+            'patient_id' => $other->id,
+            'service_id' => $service->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => $at->addMinutes(90)->format('Y-m-d\TH:i'),
+            'duration_minutes' => 30,
+        ])->assertRedirect();
+    }
+
+    public function test_overlapping_unassigned_bookings_conflict(): void
+    {
+        $p1 = Patient::query()->firstOrFail();
+        $p2 = Patient::query()->whereKeyNot($p1->id)->firstOrFail();
+        $at = now()->addDays(96)->setTime(10, 0);
+
+        \App\Models\Appointment::create([
+            'patient_id' => $p1->id,
+            'scheduled_at' => $at,          // 10:00–11:00, no provider
+            'duration_minutes' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        // Different patient, no provider, overlapping → rejected (can't double-book a slot).
+        $this->post('/appointments', [
+            'patient_id' => $p2->id,
+            'scheduled_at' => $at->addMinutes(30)->format('Y-m-d\TH:i'),
+            'duration_minutes' => 30,
+        ])->assertSessionHasErrors('scheduled_at');
+    }
+
+    public function test_different_providers_may_overlap(): void
+    {
+        $p1 = Patient::query()->firstOrFail();
+        $p2 = Patient::query()->whereKeyNot($p1->id)->firstOrFail();
+        $staffB = User::create([
+            'branch_id' => $this->owner->branch_id,
+            'name' => 'Dr Parallel',
+            'username' => 'dr.parallel',
+            'email' => 'dr.parallel@clinic.test',
+            'password' => bcrypt('password'),
+            'is_active' => true,
+        ]);
+        $at = now()->addDays(97)->setTime(10, 0);
+
+        \App\Models\Appointment::create([
+            'patient_id' => $p1->id,
+            'staff_id' => $this->owner->id,
+            'scheduled_at' => $at,
+            'duration_minutes' => 60,
+            'status' => 'scheduled',
+        ]);
+
+        // Overlapping but a DIFFERENT provider → allowed.
+        $this->post('/appointments', [
+            'patient_id' => $p2->id,
+            'staff_id' => $staffB->id,
+            'scheduled_at' => $at->addMinutes(30)->format('Y-m-d\TH:i'),
+            'duration_minutes' => 30,
+        ])->assertRedirect();
     }
 
     public function test_appointments_calendar_view_renders(): void

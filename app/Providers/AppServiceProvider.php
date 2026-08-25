@@ -58,6 +58,8 @@ class AppServiceProvider extends ServiceProvider
     {
         Date::use(CarbonImmutable::class);
 
+        $this->configureSqlite();
+
         DB::prohibitDestructiveCommands(
             app()->isProduction(),
         );
@@ -71,5 +73,28 @@ class AppServiceProvider extends ServiceProvider
                 ->uncompromised()
             : null,
         );
+    }
+
+    /**
+     * Keep SQLite's transaction statement-journals and temporary b-trees in
+     * memory. A constraint-heavy INSERT inside a transaction (e.g. a stock
+     * movement, with several foreign keys) otherwise makes SQLite open a
+     * temporary file; under the PHP built-in server on Windows that temp path
+     * isn't writable, surfacing as "SQLSTATE[HY000]: 14 unable to open database
+     * file". temp_store=MEMORY removes the temp file entirely. Applied per
+     * connection so it also covers the packaged desktop build.
+     */
+    protected function configureSqlite(): void
+    {
+        $default = config('database.default');
+        if (config("database.connections.{$default}.driver") !== 'sqlite') {
+            return;
+        }
+
+        try {
+            DB::statement('PRAGMA temp_store = MEMORY');
+        } catch (\Throwable) {
+            // DB not reachable yet (e.g. first boot before migrate) — ignore.
+        }
     }
 }

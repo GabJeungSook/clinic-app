@@ -74,15 +74,26 @@ class Checkout
             $newCourses = [];
             $retailToConsume = [];   // [ [InventoryItem, qtyBase], … ] — consumed AFTER the invoice
 
-            // 1. Service lines — perform the session (consumes its own BoM once).
+            // 1. Service lines — perform one session now (consuming its BoM once),
+            //    billing per session. Prepaying more than one session creates a
+            //    package (course) for the remainder; drawing from an existing
+            //    package charges nothing.
             foreach ($lineGroups['services'] ?? [] as $line) {
                 $service = Service::findOrFail($line['service_id']);
                 $course = ! empty($line['course_id']) ? TreatmentCourse::find($line['course_id']) : null;
-                $price = round((float) $line['price'], 2);
+                $perSession = round((float) $line['price'], 2);
+                $sessionCount = max(1, (int) round((float) ($line['sessions'] ?? 1)));
                 $createdCourse = false;
 
-                if ($course === null && $service->default_session_count > 1) {
-                    $course = $this->purchaseCourse->handle($patient, $service, price: $price, purchasedAt: now());
+                // Prepaying 2+ sessions → open a package for them.
+                if ($course === null && $sessionCount > 1) {
+                    $course = $this->purchaseCourse->handle(
+                        $patient,
+                        $service,
+                        totalSessions: $sessionCount,
+                        price: round($perSession * $sessionCount, 2),
+                        purchasedAt: now(),
+                    );
                     $createdCourse = true;
                     $newCourses[] = $course;
                 }
@@ -107,13 +118,13 @@ class Checkout
 
                 $sessions[] = $session;
 
-                if ($price > 0) {
+                if ($perSession > 0) {
                     $invoiceLines[] = [
                         'description' => $createdCourse
-                            ? "{$service->name} (package of {$course->total_sessions})"
+                            ? "{$service->name} (package of {$sessionCount})"
                             : $service->name,
-                        'quantity' => 1,
-                        'unit_price' => $price,
+                        'quantity' => $sessionCount,
+                        'unit_price' => $perSession,
                         'discount' => round((float) ($line['discount'] ?? 0), 2),
                         'promotion_id' => $line['promotion_id'] ?? null,
                         'itemable' => $course ?? $service,

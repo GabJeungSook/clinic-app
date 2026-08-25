@@ -7,9 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import AppointmentCalendar from '@/components/AppointmentCalendar.vue';
-import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import SearchSelect from '@/components/SearchSelect.vue';
-import { CalendarPlus, Trash2, Clock, List, CalendarDays, CreditCard, Search } from '@lucide/vue';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { CalendarPlus, Trash2, Clock, List, CalendarDays, Search, Pencil } from '@lucide/vue';
 
 defineOptions({ layout: { breadcrumbs: [{ title: 'Appointments', href: '/appointments' }] } });
 
@@ -63,18 +71,44 @@ const setStatus = (status: string) => {
 const setRange = (range: string) =>
     router.get('/appointments', { view: 'list', range, status: props.filters.status, search: search.value }, { preserveState: true, replace: true });
 
-const changeStatus = (id: string, status: string) =>
+const postStatus = (id: string, status: string) =>
     router.post(`/appointments/${id}/status`, { status }, { preserveScroll: true });
 
-const remove = (id: string) => router.delete(`/appointments/${id}`, { preserveScroll: true });
+// Confirming (= patient has arrived) asks for a quick confirmation first.
+const confirming = ref<Appt | null>(null);
+const changeStatus = (id: string, status: string) => {
+    if (status === 'confirmed') {
+        confirming.value = props.appointments.find((a) => a.id === id) ?? null;
+        return;
+    }
+    postStatus(id, status);
+};
+const confirmArrival = () => {
+    if (!confirming.value) return;
+    postStatus(confirming.value.id, 'confirmed');
+    confirming.value = null;
+};
 
-// Check-in: open the checkout prefilled with this booking's patient + service.
-const checkoutUrl = (a: Appt) => {
-    const p = new URLSearchParams();
-    if (a.patient_id) p.set('patient', a.patient_id);
-    if (a.service_id) p.set('service', a.service_id);
-    if (a.course_id) p.set('course', a.course_id);
-    return `/checkout?${p.toString()}`;
+// "Completed" is set automatically when a patient is checked out, so it's not a
+// manual choice; a completed booking is a finished, read-only record.
+const editableStatuses = computed(() => props.statuses.filter((s) => s.value !== 'completed'));
+
+// Deletion is only offered for resolved bookings (cancelled / no-show), with an
+// option to also remove a patient who was created for a booking that fell through.
+const canDelete = (status: string) => status === 'cancelled' || status === 'no_show';
+const deleting = ref<Appt | null>(null);
+const alsoDeletePatient = ref(false);
+const openDelete = (a: Appt) => {
+    deleting.value = a;
+    alsoDeletePatient.value = false;
+};
+const confirmDelete = () => {
+    if (!deleting.value) return;
+    router.delete(`/appointments/${deleting.value.id}`, {
+        data: { delete_patient: alsoDeletePatient.value },
+        preserveScroll: true,
+        onSuccess: () => { deleting.value = null; },
+    });
 };
 
 const tone: Record<string, string> = {
@@ -164,24 +198,66 @@ const ranges = [
                                 </div>
                             </div>
                             <Badge :class="tone[a.status]" class="capitalize">{{ a.status.replace('_', ' ') }}</Badge>
-                            <Button v-if="a.patient_id" as-child variant="secondary" size="sm">
-                                <Link :href="checkoutUrl(a)"><CreditCard class="size-4" /> Checkout</Link>
-                            </Button>
-                            <div class="w-40">
-                                <SearchSelect
-                                    :model-value="a.status"
-                                    :options="statuses"
-                                    :sort="false"
-                                    @update:model-value="(v) => changeStatus(a.id, String(v))"
-                                />
-                            </div>
-                            <ConfirmDialog title="Delete appointment?" description="This will permanently remove the booking." @confirm="remove(a.id)">
-                            <Button variant="ghost" size="icon-sm"><Trash2 class="size-4 text-rose-600" /></Button>
-                        </ConfirmDialog>
+                            <!-- Completed bookings are finished records: no status change, no actions. -->
+                            <template v-if="a.status !== 'completed'">
+                                <Button v-if="a.status === 'scheduled' || a.status === 'confirmed'" as-child variant="ghost" size="icon-sm" title="Edit / reschedule">
+                                    <Link :href="`/appointments/${a.id}/edit`"><Pencil class="size-4" /></Link>
+                                </Button>
+                                <div class="w-40">
+                                    <SearchSelect
+                                        :model-value="a.status"
+                                        :options="editableStatuses"
+                                        :sort="false"
+                                        @update:model-value="(v) => changeStatus(a.id, String(v))"
+                                    />
+                                </div>
+                                <Button v-if="canDelete(a.status)" variant="ghost" size="icon-sm" title="Delete booking" @click="openDelete(a)">
+                                    <Trash2 class="size-4 text-rose-600" />
+                                </Button>
+                            </template>
                         </div>
                     </CardContent>
                 </Card>
             </div>
         </template>
+
+        <!-- Confirm arrival -->
+        <Dialog :open="confirming !== null" @update:open="(v) => { if (!v) confirming = null; }">
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Confirm this appointment?</DialogTitle>
+                    <DialogDescription>
+                        This marks {{ confirming?.name }}'s {{ confirming?.time }} booking as <strong>confirmed</strong> — use it when the patient has arrived at the clinic.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter class="gap-2 sm:gap-2">
+                    <Button variant="ghost" @click="confirming = null">Cancel</Button>
+                    <Button @click="confirmArrival">Confirm arrival</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Delete booking (with optional patient cleanup) -->
+        <Dialog :open="deleting !== null" @update:open="(v) => { if (!v) deleting = null; }">
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Delete appointment?</DialogTitle>
+                    <DialogDescription>
+                        This permanently removes the {{ deleting?.status.replace('_', ' ') }} booking for {{ deleting?.name }}.
+                    </DialogDescription>
+                </DialogHeader>
+                <label v-if="deleting?.patient_id" class="flex items-start gap-2.5 rounded-lg border p-3 text-sm">
+                    <Checkbox v-model="alsoDeletePatient" class="mt-0.5" />
+                    <span>
+                        Also delete the patient record for <strong>{{ deleting?.name }}</strong>.
+                        <span class="mt-0.5 block text-xs text-muted-foreground">Kept automatically if they have any invoices, courses, sessions, or other appointments.</span>
+                    </span>
+                </label>
+                <DialogFooter class="gap-2 sm:gap-2">
+                    <Button variant="ghost" @click="deleting = null">Cancel</Button>
+                    <Button variant="destructive" @click="confirmDelete">Delete</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

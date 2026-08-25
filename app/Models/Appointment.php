@@ -19,6 +19,7 @@ class Appointment extends Model
         return [
             'status' => AppointmentStatus::class,
             'scheduled_at' => 'datetime',
+            'services' => 'array',
         ];
     }
 
