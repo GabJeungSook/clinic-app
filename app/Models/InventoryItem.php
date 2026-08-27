@@ -59,6 +59,25 @@ class InventoryItem extends Model implements Auditable
         return (float) $this->movements()->sum('quantity');
     }
 
+    /**
+     * On-hand quantity that may actually be CONSUMED — i.e. total on hand minus
+     * anything sitting in an already-expired batch. Expired stock must be written
+     * off, never used on a patient, so it does not count towards what is usable.
+     * Non-batch-tracked items have no expiry, so their usable == on hand.
+     */
+    public function usableStockOnHand(?\DateTimeInterface $asOf = null): float
+    {
+        if (! $this->is_batch_tracked) {
+            return $this->stockOnHand();
+        }
+
+        return (float) $this->batches()
+            ->where(fn ($q) => $q
+                ->whereNull('expiry_date')
+                ->orWhereDate('expiry_date', '>=', $asOf ?? now()))
+            ->sum('qty_remaining_cache');
+    }
+
     /** Recompute and persist the on-hand cache; returns the value. */
     public function refreshStockCache(): float
     {

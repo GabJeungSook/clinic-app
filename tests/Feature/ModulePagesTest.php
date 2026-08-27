@@ -46,6 +46,7 @@ class ModulePagesTest extends TestCase
             ['/inventory/create', 'Inventory/Create'],
             ['/inventory/categories', 'Inventory/Categories'],
             ['/inventory/units', 'Inventory/Units'],
+            ['/inventory/stocktake', 'Inventory/Stocktake'],
             ['/services/categories', 'Services/Categories'],
             ['/suppliers', 'Purchasing/Suppliers'],
             ['/purchases', 'Purchasing/Index'],
@@ -101,6 +102,61 @@ class ModulePagesTest extends TestCase
         $this->post("/purchases/{$purchase->id}/receive")->assertRedirect();
 
         $this->assertEqualsWithDelta($before + 50, $item->fresh()->stockOnHand(), 0.001);
+    }
+
+    public function test_stocktake_adjusts_only_items_whose_count_differs(): void
+    {
+        $pc = Unit::query()->where('abbreviation', 'pc')->firstOrFail();
+        $make = fn (string $name) => InventoryItem::query()->create([
+            'name' => $name,
+            'type' => \App\Enums\ItemType::Consumable,
+            'base_unit_id' => $pc->id,
+            'is_batch_tracked' => false,
+            'track_expiry' => false,
+            'reorder_level' => 5,
+        ]);
+        $receive = app(\App\Actions\Inventory\ReceiveStock::class);
+
+        $a = $make('Count A');
+        $receive->handle($a, 10);
+        $b = $make('Count B');
+        $receive->handle($b, 8);
+
+        $this->post('/inventory/stocktake', ['counts' => [
+            ['id' => $a->id, 'counted' => 7], // differs → should adjust down to 7
+            ['id' => $b->id, 'counted' => 8], // matches → no movement
+        ]])->assertRedirect();
+
+        $this->assertEqualsWithDelta(7.0, $a->fresh()->stockOnHand(), 0.001);
+        $this->assertEqualsWithDelta(8.0, $b->fresh()->stockOnHand(), 0.001);
+        $this->assertDatabaseHas('stock_movements', ['inventory_item_id' => $a->id, 'type' => 'adjustment_out']);
+        $this->assertDatabaseMissing('stock_movements', ['inventory_item_id' => $b->id, 'type' => 'adjustment_in']);
+        $this->assertDatabaseMissing('stock_movements', ['inventory_item_id' => $b->id, 'type' => 'adjustment_out']);
+    }
+
+    public function test_reorder_creates_a_draft_purchase_from_low_stock(): void
+    {
+        $pc = Unit::query()->where('abbreviation', 'pc')->firstOrFail();
+        $low = InventoryItem::query()->create([
+            'name' => 'Reorder me',
+            'type' => \App\Enums\ItemType::Consumable,
+            'base_unit_id' => $pc->id,
+            'is_batch_tracked' => false,
+            'track_expiry' => false,
+            'reorder_level' => 50,
+            'reorder_qty' => 40,
+        ]);
+        app(\App\Actions\Inventory\ReceiveStock::class)->handle($low, 5);
+
+        $before = Purchase::query()->count();
+        $this->post('/purchases/reorder')->assertRedirect();
+
+        $this->assertSame($before + 1, Purchase::query()->count());
+        $purchase = Purchase::query()->latest('created_at')->firstOrFail();
+        $this->assertTrue(
+            $purchase->items->contains('inventory_item_id', $low->id),
+            'the drafted order includes the low-stock item',
+        );
     }
 
     public function test_full_billing_flow_checkout_pay_receipt(): void

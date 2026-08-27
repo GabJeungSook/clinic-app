@@ -56,11 +56,12 @@ const removeItem = () => router.delete(`/inventory/${props.item.id}`);
             <CardContent class="flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
                     <p class="text-xs text-muted-foreground">On hand</p>
-                    <p class="text-3xl font-bold tracking-tight">{{ Number(item.on_hand) }} <span class="text-lg font-normal text-muted-foreground">{{ item.unit }}</span></p>
+                    <p class="text-3xl font-bold tracking-tight" :class="item.on_hand < 0 ? 'text-rose-600' : ''">{{ Number(item.on_hand) }} <span class="text-lg font-normal text-muted-foreground">{{ item.unit }}</span></p>
                 </div>
                 <div class="text-right text-sm text-muted-foreground">
-                    <p>Reorder level: {{ Number(item.reorder_level) }}</p>
-                    <Badge v-if="item.is_low" variant="destructive" class="mt-1">Low stock</Badge>
+                    <p>Reorder level: {{ Number(item.reorder_level) }} {{ item.unit }}</p>
+                    <Badge v-if="item.on_hand < 0" class="mt-1 bg-rose-600 text-white">Oversold — needs a stock count</Badge>
+                    <Badge v-else-if="item.is_low" variant="destructive" class="mt-1">Low stock</Badge>
                     <Badge v-else variant="secondary" class="mt-1">OK</Badge>
                 </div>
             </CardContent>
@@ -140,7 +141,7 @@ const removeItem = () => router.delete(`/inventory/${props.item.id}`);
                             <td class="px-4 py-2 whitespace-nowrap text-muted-foreground">{{ fmt(m.occurred_at) }}</td>
                             <td class="px-4 py-2">{{ m.type_label }}</td>
                             <td class="px-4 py-2 text-right font-medium" :class="m.quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'">
-                                {{ m.quantity >= 0 ? '+' : '' }}{{ Number(m.quantity) }}
+                                {{ m.quantity >= 0 ? '+' : '' }}{{ Number(m.quantity) }} <span class="text-xs font-normal text-muted-foreground">{{ item.unit }}</span>
                             </td>
                             <td class="px-4 py-2 text-muted-foreground">{{ m.reason ?? '—' }}</td>
                             <td class="px-4 py-2 text-muted-foreground">{{ m.by ?? '—' }}</td>

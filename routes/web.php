@@ -5,6 +5,7 @@ use App\Http\Controllers\ClinicSettingsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryCategoryController;
 use App\Http\Controllers\InventoryController;
+use App\Http\Controllers\StocktakeController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\PatientController;
@@ -94,6 +95,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('inventory/units/{unit}', [UnitController::class, 'update'])->name('units.update');
         Route::delete('inventory/units/{unit}', [UnitController::class, 'destroy'])->name('units.destroy');
 
+        Route::get('inventory/stocktake', [StocktakeController::class, 'edit'])->name('inventory.stocktake');
+        Route::post('inventory/stocktake', [StocktakeController::class, 'store'])->name('inventory.stocktake.store');
+
         Route::resource('inventory', InventoryController::class)->parameters(['inventory' => 'inventory']);
         Route::post('inventory/{inventory}/receive', [InventoryController::class, 'receiveStock'])->name('inventory.receive');
         Route::post('inventory/{inventory}/adjust', [InventoryController::class, 'adjustStock'])->name('inventory.adjust');
@@ -103,6 +107,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Purchasing
     Route::middleware('can:purchasing.view')->group(function () {
         Route::resource('suppliers', SupplierController::class)->only(['index', 'store', 'update', 'destroy']);
+        Route::post('purchases/reorder', [PurchaseController::class, 'reorder'])->name('purchases.reorder');
         Route::resource('purchases', PurchaseController::class)->only(['index', 'create', 'store', 'show']);
         Route::post('purchases/{purchase}/receive', [PurchaseController::class, 'receive'])->name('purchases.receive');
     });

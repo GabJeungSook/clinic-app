@@ -14,8 +14,13 @@ const activeSection = ref<string | null>(null);
 async function run(key: string | null) {
     activeSection.value = key;
     await nextTick();
+    // Switch the printable region into the professional "document" look for the
+    // duration of the print dialog, then revert so the on-screen view is untouched.
+    const el = document.querySelector('.printable');
+    el?.classList.add('report-export');
     const done = () => {
         activeSection.value = null;
+        el?.classList.remove('report-export');
         window.removeEventListener('afterprint', done);
     };
     window.addEventListener('afterprint', done);

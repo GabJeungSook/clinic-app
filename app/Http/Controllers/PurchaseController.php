@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\Purchasing\DraftReorderPurchase;
 use App\Actions\Purchasing\ReceivePurchase;
 use App\Enums\PurchaseStatus;
 use App\Models\InventoryItem;
@@ -96,6 +97,18 @@ class PurchaseController extends Controller
         });
 
         return redirect()->route('purchases.show', $purchase)->with('success', 'Purchase saved.');
+    }
+
+    public function reorder(Request $request, DraftReorderPurchase $draft): RedirectResponse
+    {
+        $purchase = $draft->handle($request->user()?->id);
+
+        if ($purchase === null) {
+            return back()->with('error', 'Nothing needs reordering right now.');
+        }
+
+        return redirect()->route('purchases.show', $purchase)
+            ->with('success', 'Draft order created from low-stock items. Review the quantities and supplier, then receive when it arrives.');
     }
 
     public function show(Purchase $purchase): Response

@@ -86,6 +86,11 @@ return [
         'content',
         'node_modules',
         '*/tests',
+        // Never ship the local dev SQLite database (patient/test data). At runtime
+        // the app uses a fresh nativephp.sqlite in the user's data folder instead.
+        'database/*.sqlite',
+        'database/*.sqlite-shm',
+        'database/*.sqlite-wal',
     ],
 
     /**

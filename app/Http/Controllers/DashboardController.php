@@ -30,9 +30,34 @@ class DashboardController extends Controller
             ->where('is_active', true)
             ->where('reorder_level', '>', 0)
             ->whereColumn('stock_on_hand_cache', '<=', 'reorder_level')
+            ->with('baseUnit:id,abbreviation')
             ->orderBy('stock_on_hand_cache')
             ->limit(8)
-            ->get(['id', 'name', 'stock_on_hand_cache', 'reorder_level']);
+            ->get(['id', 'name', 'base_unit_id', 'stock_on_hand_cache', 'reorder_level'])
+            ->map(fn (InventoryItem $i) => [
+                'id' => $i->id,
+                'name' => $i->name,
+                'unit' => $i->baseUnit?->abbreviation,
+                'stock_on_hand_cache' => (float) $i->stock_on_hand_cache,
+                'reorder_level' => (float) $i->reorder_level,
+            ]);
+
+        // Oversold = negative on hand: a sale/consumption drove stock below zero,
+        // usually a wrong recipe or an unrecorded delivery. Surfaced so it gets
+        // reconciled with a stock count the same day.
+        $oversold = InventoryItem::query()
+            ->where('is_active', true)
+            ->where('stock_on_hand_cache', '<', 0)
+            ->with('baseUnit:id,abbreviation')
+            ->orderBy('stock_on_hand_cache')
+            ->limit(8)
+            ->get(['id', 'name', 'base_unit_id', 'stock_on_hand_cache'])
+            ->map(fn (InventoryItem $i) => [
+                'id' => $i->id,
+                'name' => $i->name,
+                'unit' => $i->baseUnit?->abbreviation,
+                'on_hand' => (float) $i->stock_on_hand_cache,
+            ]);
 
         $expiringSoon = Batch::query()
             ->whereNotNull('expiry_date')
@@ -104,12 +129,14 @@ class DashboardController extends Controller
                     ->sum(fn ($i) => $i->amountDue()),
                 'low_stock_count' => $lowStock->count(),
                 'expiring_soon_count' => $expiringSoon->count(),
+                'oversold_count' => $oversold->count(),
                 'appointments_today' => Appointment::query()
                     ->whereBetween('scheduled_at', [$today, $today->copy()->endOfDay()])
                     ->whereIn('status', [AppointmentStatus::Scheduled, AppointmentStatus::Confirmed])
                     ->count(),
             ],
             'lowStock' => $lowStock,
+            'oversold' => $oversold,
             'expiringSoon' => $expiringSoon,
             'appointmentsToday' => $appointmentsToday,
             'revenueSeries' => $revenueSeries,

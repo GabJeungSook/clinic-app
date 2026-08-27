@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Actions\Inventory\ConsumeStockFefo;
 use App\Actions\Inventory\ReceiveStock;
 use App\Actions\Inventory\WriteOffExpiredStock;
+use App\Actions\Purchasing\DraftReorderPurchase;
 use App\Actions\Purchasing\ReceivePurchase;
 use App\Enums\ItemType;
 use App\Enums\PurchaseStatus;
@@ -84,6 +85,86 @@ class InventoryTest extends TestCase
 
         $this->expectException(InsufficientStockException::class);
         app(ConsumeStockFefo::class)->handle($item, 10);
+    }
+
+    public function test_fefo_skips_expired_batch_and_uses_a_valid_one(): void
+    {
+        $item = $this->item();
+        $receive = app(ReceiveStock::class);
+
+        // An expired batch (soonest date) and a valid one.
+        $expired = $receive->handle($item, 10, expiryDate: now()->subDay(), batchNumber: 'OLD');
+        $valid = $receive->handle($item, 10, expiryDate: now()->addMonths(6), batchNumber: 'NEW');
+
+        $movements = app(ConsumeStockFefo::class)->handle($item, 4);
+
+        // Only the valid batch may be drawn from — the expired one is left intact.
+        $this->assertCount(1, $movements);
+        $this->assertSame($valid->id, $movements[0]->batch_id);
+        $this->assertEqualsWithDelta(10.0, $expired->fresh()->qtyRemaining(), 0.001, 'expired batch untouched');
+        $this->assertEqualsWithDelta(6.0, $valid->fresh()->qtyRemaining(), 0.001);
+    }
+
+    public function test_consume_refuses_when_only_expired_stock_remains(): void
+    {
+        $item = $this->item();
+        app(ReceiveStock::class)->handle($item, 10, expiryDate: now()->subDay(), batchNumber: 'OLD');
+
+        // There are 10 on hand, but all expired → consumption must refuse.
+        $this->expectException(InsufficientStockException::class);
+        app(ConsumeStockFefo::class)->handle($item, 3);
+    }
+
+    public function test_usable_stock_excludes_expired_batches(): void
+    {
+        $item = $this->item();
+        $receive = app(ReceiveStock::class);
+        $receive->handle($item, 10, expiryDate: now()->subDay(), batchNumber: 'OLD');
+        $receive->handle($item, 7, expiryDate: now()->addMonth(), batchNumber: 'NEW');
+
+        $item->refresh();
+        $this->assertEqualsWithDelta(17.0, $item->stockOnHand(), 0.001, 'total on hand counts everything');
+        $this->assertEqualsWithDelta(7.0, $item->usableStockOnHand(), 0.001, 'usable excludes the expired batch');
+    }
+
+    public function test_draft_reorder_purchase_includes_only_items_needing_stock(): void
+    {
+        $receive = app(ReceiveStock::class);
+
+        // Low item — reorder level 20, only 5 on hand, reorder_qty 12.
+        $low = $this->item();
+        $low->update(['name' => 'Low item', 'reorder_qty' => 12]);
+        $receive->handle($low, 5);
+
+        // Well-stocked item — should NOT be included.
+        $ok = InventoryItem::query()->create([
+            'name' => 'Fine item',
+            'type' => ItemType::Consumable,
+            'base_unit_id' => $this->pc->id,
+            'is_batch_tracked' => true,
+            'track_expiry' => false,
+            'reorder_level' => 5,
+        ]);
+        $receive->handle($ok, 100);
+
+        $purchase = app(DraftReorderPurchase::class)->handle();
+
+        $this->assertNotNull($purchase);
+        $this->assertSame(PurchaseStatus::Draft, $purchase->status);
+        $this->assertCount(1, $purchase->items);
+
+        $line = $purchase->items->first();
+        $this->assertSame($low->id, $line->inventory_item_id);
+        $this->assertEqualsWithDelta(12.0, (float) $line->quantity, 0.001, 'uses the configured reorder quantity');
+        $this->assertSame($this->pc->id, $line->unit_id);
+    }
+
+    public function test_draft_reorder_purchase_returns_null_when_nothing_is_low(): void
+    {
+        $item = $this->item();
+        app(ReceiveStock::class)->handle($item, 500); // well above reorder level
+
+        $this->assertNull(app(DraftReorderPurchase::class)->handle());
     }
 
     public function test_consume_override_allows_going_short(): void

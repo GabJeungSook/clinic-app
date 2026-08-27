@@ -9,9 +9,13 @@ import { downloadElementPdf, pdfDateStamp } from '@/lib/pdf';
 const props = defineProps<{
     sectionKey: string;
     title: string;
-    meta: { clinic: string | null; generated_at: string; currency: string };
+    meta: { clinic: string | null; address?: string | null; phone?: string | null; generated_at: string; currency: string };
     subtitle?: string;
 }>();
+
+const contactLine = computed(() =>
+    [props.meta.address, props.meta.phone].filter((v) => v && String(v).trim() !== '').join('  ·  '),
+);
 
 const { activeSection, printSection } = usePrint();
 
@@ -34,12 +38,22 @@ const soleTarget = computed(() => activeSection.value === props.sectionKey);
 
 <template>
     <Card ref="cardEl" :class="{ 'print-hidden': hidden }">
-        <!-- Standalone report header (only when this list is printed by itself) -->
-        <div v-if="soleTarget" class="print-only border-b px-6 pb-3 pt-4">
-            <h1 class="text-lg font-bold">{{ meta.clinic || 'Clinic' }}</h1>
-            <p v-if="subtitle" class="text-sm text-muted-foreground">{{ subtitle }}</p>
-            <p class="text-xs text-muted-foreground">Generated {{ meta.generated_at }}</p>
-        </div>
+        <!-- Standalone letterhead (only when this list is printed/exported by itself) -->
+        <table v-if="soleTarget" class="print-only report-letterhead report-letterhead--section">
+            <tbody>
+                <tr>
+                    <td class="report-letterhead__brand">
+                        <span class="report-letterhead__name">{{ meta.clinic || 'Clinic' }}</span>
+                        <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
+                    </td>
+                    <td class="report-letterhead__meta">
+                        <span class="report-letterhead__doctype">{{ title }}</span>
+                        <span v-if="subtitle" class="report-letterhead__period">{{ subtitle }}</span>
+                        <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
 
         <CardHeader class="flex flex-row items-center justify-between gap-3">
             <div>

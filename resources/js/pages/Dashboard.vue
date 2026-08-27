@@ -33,6 +33,7 @@ interface Stats {
     outstanding_amount: number;
     low_stock_count: number;
     expiring_soon_count: number;
+    oversold_count: number;
     appointments_today: number;
 }
 
@@ -40,7 +41,8 @@ interface Point { label: string; value: number }
 
 const props = defineProps<{
     stats: Stats;
-    lowStock: Array<{ id: string; name: string; stock_on_hand_cache: number; reorder_level: number }>;
+    lowStock: Array<{ id: string; name: string; unit: string | null; stock_on_hand_cache: number; reorder_level: number }>;
+    oversold: Array<{ id: string; name: string; unit: string | null; on_hand: number }>;
     expiringSoon: Array<{ id: string; batch_number: string | null; expiry_date: string; qty_remaining_cache: number; item: { name: string } }>;
     appointmentsToday: Array<{ id: string; name: string; service: string | null; time: string }>;
     revenueSeries: Point[];
@@ -168,6 +170,25 @@ const kpis = computed(() => [
             </Card>
         </div>
 
+        <!-- Oversold / needs-attention banner -->
+        <Card v-if="oversold.length > 0" class="border-rose-300/60 bg-rose-50/60 dark:bg-rose-950/20">
+            <CardContent class="flex flex-wrap items-center gap-3 p-4">
+                <div class="flex size-9 items-center justify-center rounded-lg bg-rose-100 text-rose-600 dark:bg-rose-900">
+                    <TriangleAlert class="size-5" />
+                </div>
+                <span class="text-sm">
+                    <strong>{{ stats.oversold_count }}</strong> item(s) show negative stock (oversold) —
+                    <span class="text-muted-foreground">
+                        {{ oversold.slice(0, 3).map((o) => `${o.name} (${Number(o.on_hand)} ${o.unit ?? ''})`).join(', ') }}<span v-if="oversold.length > 3"> …</span>.
+                    </span>
+                    Do a stock count to correct them.
+                </span>
+                <Link href="/inventory?sort=stock_asc" class="ml-auto flex items-center gap-1 text-sm font-medium text-rose-700 hover:underline dark:text-rose-400">
+                    Review <ArrowRight class="size-3.5" />
+                </Link>
+            </CardContent>
+        </Card>
+
         <!-- Outstanding banner -->
         <Card v-if="stats.outstanding_amount > 0" class="border-amber-300/60 bg-amber-50/60 dark:bg-amber-950/20">
             <CardContent class="flex items-center gap-3 p-4">
@@ -234,7 +255,7 @@ const kpis = computed(() => [
                         <li v-for="i in lowStock" :key="i.id" class="flex items-center justify-between py-2.5 text-sm">
                             <span class="font-medium">{{ i.name }}</span>
                             <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                                {{ Number(i.stock_on_hand_cache) }} / {{ Number(i.reorder_level) }}
+                                {{ Number(i.stock_on_hand_cache) }} / {{ Number(i.reorder_level) }} {{ i.unit }}
                             </span>
                         </li>
                     </ul>

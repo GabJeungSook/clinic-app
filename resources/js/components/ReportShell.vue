@@ -8,7 +8,7 @@ import { downloadElementPdf, pdfDateStamp } from '@/lib/pdf';
 
 const props = defineProps<{
     title: string;
-    meta: { clinic: string | null; generated_at: string; currency: string };
+    meta: { clinic: string | null; address?: string | null; phone?: string | null; generated_at: string; currency: string };
     subtitle?: string;
 }>();
 
@@ -37,6 +37,9 @@ const page = usePage();
 const isActive = (href: string) => (page.url as string).split('?')[0] === href;
 
 const clinicName = computed(() => props.meta.clinic || 'Clinic');
+const contactLine = computed(() =>
+    [props.meta.address, props.meta.phone].filter((v) => v && String(v).trim() !== '').join('  ·  '),
+);
 
 const { activeSection, printAll } = usePrint();
 </script>
@@ -66,14 +69,23 @@ const { activeSection, printAll } = usePrint();
             </div>
         </div>
 
-        <!-- Print-only header — shown only when printing the whole report -->
-        <div v-if="activeSection === null" class="print-only border-b pb-3">
-            <h1 class="text-lg font-bold">{{ clinicName }}</h1>
-            <p class="text-sm">
-                {{ title }}<span v-if="subtitle"> · {{ subtitle }}</span>
-            </p>
-            <p class="text-xs text-muted-foreground">Generated {{ meta.generated_at }}</p>
-        </div>
+        <!-- Print/PDF letterhead — a real table so it renders two-column in the
+             PDF (html2canvas does not lay out flexbox/grid). -->
+        <table v-if="activeSection === null" class="print-only report-letterhead">
+            <tbody>
+                <tr>
+                    <td class="report-letterhead__brand">
+                        <span class="report-letterhead__name">{{ clinicName }}</span>
+                        <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
+                    </td>
+                    <td class="report-letterhead__meta">
+                        <span class="report-letterhead__doctype">{{ title }}</span>
+                        <span v-if="subtitle" class="report-letterhead__period">{{ subtitle }}</span>
+                        <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
 
         <!-- On-screen title -->
         <div class="no-print">

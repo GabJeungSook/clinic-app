@@ -52,6 +52,7 @@ class InventoryController extends Controller
                 'on_hand' => (float) $i->stock_on_hand_cache,
                 'reorder_level' => (float) $i->reorder_level,
                 'is_low' => $i->isLowStock(),
+                'is_negative' => (float) $i->stock_on_hand_cache < 0,
                 'is_active' => (bool) $i->is_active,
             ]);
 

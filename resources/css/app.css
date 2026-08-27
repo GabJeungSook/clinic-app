@@ -300,6 +300,9 @@
     display: none;
 }
 @media print {
+    @page {
+        margin: 14mm;
+    }
     body {
         background: white !important;
     }
@@ -311,7 +314,7 @@
         visibility: visible;
     }
     /* Neutralise the sidebar layout so the printable region anchors to the page
-       (full width, centred) instead of the offset/narrowed main content area. */
+       (centred document) instead of the offset/narrowed main content area. */
     [data-slot='sidebar'] {
         display: none !important;
     }
@@ -320,12 +323,20 @@
         margin: 0 !important;
         box-shadow: none !important;
     }
+    /* Anchor the report to the full page area (inside the @page margins) so it
+       fills the width instead of collapsing to the app's narrow content column. */
     .printable {
-        position: absolute;
+        position: absolute !important;
         left: 0;
         top: 0;
         width: 100%;
-        padding: 1rem !important;
+        padding: 0 !important;
+    }
+    /* The @page margin already provides the paper margins, so in print the
+       document fills the usable width (the max-width is only for the PDF path). */
+    .report-export {
+        max-width: none !important;
+        margin: 0 !important;
     }
     .no-print {
         display: none !important;
@@ -340,7 +351,148 @@
     }
     /* Keep table rows from splitting awkwardly across pages. */
     tr,
-    .card-elevated {
+    [data-slot='card'] {
         break-inside: avoid;
     }
+}
+
+/* ---------------------------------------------------------------------------
+   Professional "document" look for the printed / exported report.
+
+   A single .report-export class carries the whole look. It is switched on only
+   at the moment of output: toggled onto the .printable root while the browser
+   print dialog is open (resources/js/lib/print.ts) and injected into the cloned
+   DOM that html2canvas rasterises to PDF (resources/js/lib/pdf.ts). So the live
+   on-screen report keeps its interactive dashboard styling, while Print and PDF
+   both render this identical, centred, letterhead document.
+--------------------------------------------------------------------------- */
+.report-export {
+    max-width: 720px;
+    margin: 0 auto;
+    color: #1f2937;
+    font-size: 12px;
+    line-height: 1.5;
+    background: #ffffff;
+}
+.report-export .print-only {
+    display: block !important;
+}
+.report-export .no-print {
+    display: none !important;
+}
+
+/* Letterhead — a real <table> so it stays two-column in the PDF. */
+.report-export table.report-letterhead {
+    display: table !important;
+    width: 100%;
+    border-collapse: collapse;
+    border-bottom: 2px solid #be185d; /* brand rose */
+    margin-bottom: 1.25rem;
+}
+.report-export table.report-letterhead td {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 0 0.85rem !important;
+    vertical-align: top;
+}
+.report-export .report-letterhead--section td {
+    padding: 1.25rem 1.5rem 0.85rem !important;
+}
+.report-export .report-letterhead__brand {
+    text-align: left;
+}
+.report-export .report-letterhead__meta {
+    text-align: right;
+}
+.report-export .report-letterhead__name {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #9d174d;
+    line-height: 1.15;
+}
+.report-export .report-letterhead__contact {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.72rem;
+    color: #6b7280;
+}
+.report-export .report-letterhead__doctype {
+    display: block;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #111827;
+}
+.report-export .report-letterhead__period {
+    display: block;
+    font-size: 0.72rem;
+    color: #6b7280;
+    margin-top: 0.12rem;
+}
+.report-export .report-letterhead__generated {
+    display: block;
+    font-size: 0.68rem;
+    color: #9ca3af;
+    margin-top: 0.12rem;
+}
+
+/* Section titles */
+.report-export [data-slot='card-title'] {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #9d174d;
+}
+
+/* Cards → flat document sections (no elevation on paper) */
+.report-export [data-slot='card'] {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px;
+    background: #ffffff !important;
+    margin-bottom: 1rem;
+    break-inside: avoid;
+}
+
+/* Summary cards: html2canvas can't lay out CSS grid, so render the top-level
+   summary row as inline-blocks (which it does support). */
+.report-export > .grid {
+    display: block !important;
+    font-size: 0; /* collapse inline-block whitespace gaps */
+    margin-bottom: 1rem;
+}
+.report-export > .grid > * {
+    display: inline-block !important;
+    vertical-align: top;
+    width: 31.8%;
+    margin: 0 1% 0.5rem 0;
+    font-size: 12px;
+}
+
+/* Tables → clean, readable ledger style */
+.report-export table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+}
+.report-export thead th {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #6b7280 !important;
+    background: #faf5f7 !important;
+    border-bottom: 1.5px solid #e5b8cd;
+    padding: 8px 14px;
+}
+.report-export tbody td {
+    padding: 7px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #1f2937;
+}
+.report-export tbody tr:nth-child(even) td {
+    background: #fbfafb;
+}
+.report-export tbody tr:last-child td {
+    border-bottom: 0;
 }

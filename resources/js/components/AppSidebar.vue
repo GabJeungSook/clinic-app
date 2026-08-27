@@ -68,11 +68,18 @@ const permissions = computed<string[]>(
     () => ((usePage().props.auth as { permissions?: string[] })?.permissions) ?? [],
 );
 
+// Live count of inventory items needing attention (shared from the server).
+const inventoryAlerts = computed<number>(
+    () => Number(usePage().props.inventoryAlerts ?? 0),
+);
+
 const visibleGroups = computed(() =>
     navGroups
         .map((group) => ({
             label: group.label,
-            items: group.items.filter((i) => !i.permission || permissions.value.includes(i.permission)),
+            items: group.items
+                .filter((i) => !i.permission || permissions.value.includes(i.permission))
+                .map((i) => (i.href === '/inventory' ? { ...i, badge: inventoryAlerts.value } : i)),
         }))
         .filter((group) => group.items.length > 0),
 );

@@ -30,6 +30,8 @@ class ReportController extends Controller
     {
         return [
             'clinic' => Settings::get('clinic.name'),
+            'address' => Settings::get('clinic.address'),
+            'phone' => Settings::get('clinic.phone'),
             'generated_at' => now()->format('F j, Y g:iA'),
             'currency' => Settings::get('billing.currency_symbol', '₱'),
         ];
