@@ -20,7 +20,7 @@ const maxSvc = computed(() => Math.max(1, ...props.topServices.map((s) => s.coun
 <template>
     <Head title="Treatments report" />
     <ReportShell title="Treatments report" subtitle="Last 30 days" :meta="meta">
-        <div class="grid grid-cols-3 gap-4">
+        <div class="report-kpis grid grid-cols-3 gap-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Sessions (30d)</p><p class="text-2xl font-semibold">{{ totals.sessions_30 }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Active courses</p><p class="text-2xl font-semibold">{{ totals.active_courses }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Completed</p><p class="text-2xl font-semibold">{{ totals.completed_courses }}</p></CardContent></Card>

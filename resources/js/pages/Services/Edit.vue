@@ -101,28 +101,27 @@ const removeConsumable = (id: string) =>
                     <li v-if="consumables.length === 0" class="py-3 text-center text-muted-foreground">No consumables set.</li>
                 </ul>
 
-                <form
-                    class="grid grid-cols-1 gap-3 border-t pt-4 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_auto] sm:items-end"
-                    @submit.prevent="addConsumable"
-                >
-                    <div class="grid min-w-0 gap-1.5">
-                        <Label>Item</Label>
-                        <SearchSelect v-model="bom.inventory_item_id" :options="items" placeholder="Select…" />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label>Qty</Label>
-                        <Input type="number" step="0.001" min="0.001" v-model="bom.quantity" />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label>Unit</Label>
-                        <SearchSelect v-model="bom.unit_id" :options="units" placeholder="…" />
+                <form class="space-y-3 border-t pt-4" @submit.prevent="addConsumable">
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_5rem_minmax(0,8rem)] sm:items-end">
+                        <div class="grid min-w-0 gap-1.5">
+                            <Label>Item</Label>
+                            <SearchSelect v-model="bom.inventory_item_id" :options="items" placeholder="Select…" />
+                        </div>
+                        <div class="grid min-w-0 gap-1.5">
+                            <Label>Qty</Label>
+                            <Input type="number" step="0.001" min="0.001" v-model="bom.quantity" />
+                        </div>
+                        <div class="grid min-w-0 gap-1.5">
+                            <Label>Unit</Label>
+                            <SearchSelect v-model="bom.unit_id" :options="units" placeholder="…" />
+                        </div>
                     </div>
                     <Button
                         type="submit"
-                        class="w-full sm:w-auto"
+                        class="w-full"
                         :disabled="bom.processing || !bom.inventory_item_id || !bom.unit_id"
                     >
-                        Add
+                        Add item
                     </Button>
                 </form>
             </CardContent>

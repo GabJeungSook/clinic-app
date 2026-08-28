@@ -349,9 +349,10 @@
     .print-hidden {
         display: none !important;
     }
-    /* Keep table rows from splitting awkwardly across pages. */
-    tr,
-    [data-slot='card'] {
+    /* Keep individual table rows intact, but DON'T force a whole section/card
+       onto one page — a long ledger (e.g. the movement log) is taller than a
+       page, and an unbreakable block that tall prints as a blank page. */
+    tr {
         break-inside: avoid;
     }
 }
@@ -373,6 +374,12 @@
     font-size: 12px;
     line-height: 1.5;
     background: #ffffff;
+    /* The .printable root is a `flex flex-col gap-6` (24px) container. On paper
+       that flex gap stacks on top of each block's own margin-bottom, producing
+       uneven ~40px voids between sections. Neutralise the flex gap so the
+       document's vertical rhythm comes from the margins below, and nothing
+       else. */
+    gap: 0 !important;
 }
 .report-export .print-only {
     display: block !important;
@@ -395,8 +402,11 @@
     padding: 0 0 0.85rem !important;
     vertical-align: top;
 }
-.report-export .report-letterhead--section td {
-    padding: 1.25rem 1.5rem 0.85rem !important;
+/* `table.` is required so this outranks the base `table.report-letterhead td`
+   rule above (equal specificity, later wins) — otherwise the section letterhead
+   loses its side padding and its text jams against the page edges. */
+.report-export table.report-letterhead--section td {
+    padding: 0.4rem 1.5rem 0.9rem !important;
 }
 .report-export .report-letterhead__brand {
     text-align: left;
@@ -451,22 +461,96 @@
     border-radius: 8px;
     background: #ffffff !important;
     margin-bottom: 1rem;
-    break-inside: avoid;
 }
 
-/* Summary cards: html2canvas can't lay out CSS grid, so render the top-level
-   summary row as inline-blocks (which it does support). */
-.report-export > .grid {
+/* KPI summary strip: a centred inline-block row (html2canvas can't lay out
+   grid/flex) that fits either three or four cards on one line without wrapping. */
+.report-export > .report-kpis {
     display: block !important;
     font-size: 0; /* collapse inline-block whitespace gaps */
+    text-align: center;
     margin-bottom: 1rem;
 }
-.report-export > .grid > * {
+.report-export > .report-kpis > * {
     display: inline-block !important;
     vertical-align: top;
-    width: 31.8%;
-    margin: 0 1% 0.5rem 0;
+    width: 23.5%;
+    margin: 0 0.5% 0.75rem;
     font-size: 12px;
+    text-align: left;
+    /* Uniform, compact KPI cards: the shadcn Card adds its own py-6 on top of
+       CardContent's padding, which makes these tiles bloated and (with icons)
+       uneven. Force one tidy height with vertically-centred content. */
+    height: 4.6rem !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    overflow: hidden;
+    justify-content: center !important;
+}
+.report-export > .report-kpis > * [data-slot='card-content'] {
+    padding: 0 0.9rem !important;
+}
+/* Any other multi-column grid stacks to a single column on paper: html2canvas
+   can't lay out grid, and full-width stacked sections paginate cleanly. */
+.report-export > .grid:not(.report-kpis) {
+    display: block !important;
+}
+.report-export > .grid:not(.report-kpis) > * {
+    width: 100% !important;
+    margin-bottom: 1rem;
+}
+
+/* Centred report-title band under the letterhead — names the report clearly. */
+.report-export .report-title {
+    text-align: center;
+    margin: 0 0 1.25rem;
+}
+.report-export .report-title__name {
+    display: block;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9d174d;
+}
+.report-export .report-title__period {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+/* Sign-off block at the foot of every report (a table so it stays two-column
+   in the PDF). */
+.report-export table.report-signoff {
+    display: table !important;
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2.75rem;
+    break-inside: avoid;
+}
+.report-export table.report-signoff td {
+    width: 50%;
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 1.5rem !important;
+    vertical-align: bottom;
+    text-align: center;
+}
+.report-export .report-signoff__line {
+    height: 2.6rem;
+    border-bottom: 1px solid #6b7280;
+    margin-bottom: 0.4rem;
+}
+.report-export .report-signoff__role {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #374151;
+}
+.report-export .report-signoff__cap {
+    margin-top: 0.1rem;
+    font-size: 0.62rem;
+    color: #9ca3af;
 }
 
 /* Tables → clean, readable ledger style */

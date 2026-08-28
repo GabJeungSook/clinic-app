@@ -73,5 +73,23 @@ const soleTarget = computed(() => activeSection.value === props.sectionKey);
         <CardContent class="p-0">
             <slot />
         </CardContent>
+
+        <!-- Sign-off block when this section is printed/exported on its own -->
+        <table v-if="soleTarget" class="print-only report-signoff">
+            <tbody>
+                <tr>
+                    <td>
+                        <div class="report-signoff__line"></div>
+                        <p class="report-signoff__role">Prepared by</p>
+                        <p class="report-signoff__cap">Signature over printed name &amp; date</p>
+                    </td>
+                    <td>
+                        <div class="report-signoff__line"></div>
+                        <p class="report-signoff__role">Approved by</p>
+                        <p class="report-signoff__cap">Signature over printed name &amp; date</p>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
     </Card>
 </template>

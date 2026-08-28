@@ -91,6 +91,8 @@ return [
         'database/*.sqlite',
         'database/*.sqlite-shm',
         'database/*.sqlite-wal',
+        // Never ship local database backups either — they contain clinic data.
+        'storage/app/backups/*',
     ],
 
     /**

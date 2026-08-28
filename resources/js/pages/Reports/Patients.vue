@@ -24,7 +24,7 @@ const pct = (n: number) => Math.round((n / demoTotal.value) * 100);
 <template>
     <Head title="Patients report" />
     <ReportShell title="Patients report" subtitle="Last 30 days" :meta="meta">
-        <div class="grid grid-cols-3 gap-4">
+        <div class="report-kpis grid grid-cols-3 gap-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Total patients</p><p class="text-2xl font-semibold">{{ totals.total }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">New this month</p><p class="text-2xl font-semibold">{{ totals.new_month }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">New (30d)</p><p class="text-2xl font-semibold">{{ totals.new_30 }}</p></CardContent></Card>

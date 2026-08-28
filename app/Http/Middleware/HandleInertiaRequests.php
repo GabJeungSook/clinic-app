@@ -2,9 +2,6 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Batch;
-use App\Models\InventoryItem;
-use App\Support\Settings\Settings;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -52,42 +49,11 @@ class HandleInertiaRequests extends Middleware
                     : [],
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
-            // Count of inventory things needing attention (low/oversold items +
-            // batches nearing expiry), shown as a badge on the Inventory nav item.
-            // Lazy closure so it only runs for users who can see inventory.
-            'inventoryAlerts' => fn () => ($user && $user->can('inventory.view'))
-                ? $this->inventoryAlertCount()
-                : 0,
             // Surfaced as toasts on the client (see resources/js/lib/flashToast.ts).
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
             ],
         ];
-    }
-
-    /**
-     * Items that are low on stock or oversold, plus batches nearing expiry —
-     * the number a manager would want to act on. Kept as a simple total so the
-     * sidebar badge stays glanceable.
-     */
-    private function inventoryAlertCount(): int
-    {
-        $threshold = (int) Settings::get('inventory.expiry_threshold_days', 30);
-
-        $needsReorder = InventoryItem::query()
-            ->where('is_active', true)
-            ->where(fn ($q) => $q
-                ->where(fn ($w) => $w->where('reorder_level', '>', 0)->whereColumn('stock_on_hand_cache', '<=', 'reorder_level'))
-                ->orWhere('stock_on_hand_cache', '<', 0))
-            ->count();
-
-        $expiring = Batch::query()
-            ->whereNotNull('expiry_date')
-            ->where('qty_remaining_cache', '>', 0)
-            ->whereDate('expiry_date', '<=', now()->addDays($threshold))
-            ->count();
-
-        return $needsReorder + $expiring;
     }
 }

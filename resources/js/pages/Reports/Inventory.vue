@@ -46,7 +46,7 @@ const { activeSection } = usePrint();
         </div>
 
         <!-- Summary cards -->
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3" :class="{ 'print-hidden': activeSection !== null }">
+        <div class="report-kpis grid grid-cols-1 gap-4 sm:grid-cols-3" :class="{ 'print-hidden': activeSection !== null }">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Stock value on hand</p><p class="text-2xl font-semibold">{{ money(stockValue) }}</p></CardContent></Card>
             <Card><CardContent class="flex items-center gap-3 p-4">
                 <div class="rounded-lg bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"><ArrowDownToLine class="size-5" /></div>

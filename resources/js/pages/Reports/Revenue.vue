@@ -52,7 +52,7 @@ const applyCustom = () => router.get('/reports/revenue', { preset: 'custom', fro
         </div>
 
         <!-- Totals -->
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div class="report-kpis grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Net sales</p><p class="text-2xl font-semibold">{{ money(totals.net) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Gross received</p><p class="text-2xl font-semibold">{{ money(totals.gross) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Refunds</p><p class="text-2xl font-semibold">{{ money(totals.refunds) }}</p></CardContent></Card>

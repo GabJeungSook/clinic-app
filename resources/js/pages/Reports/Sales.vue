@@ -54,7 +54,7 @@ const applyCustom = () => router.get('/reports/sales', { preset: 'custom', from:
         </div>
 
         <!-- Headline totals -->
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div class="report-kpis grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Gross sales</p><p class="text-2xl font-semibold">{{ money(totals.grand) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Invoices</p><p class="text-2xl font-semibold">{{ totals.count }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Collected</p><p class="text-2xl font-semibold text-emerald-600 dark:text-emerald-400">{{ money(totals.collected) }}</p></CardContent></Card>
@@ -62,7 +62,7 @@ const applyCustom = () => router.get('/reports/sales', { preset: 'custom', from:
         </div>
 
         <!-- Money breakdown strip -->
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div class="report-kpis grid grid-cols-2 gap-4 sm:grid-cols-3">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Subtotal</p><p class="text-lg font-semibold">{{ money(totals.subtotal) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Discounts</p><p class="text-lg font-semibold">-{{ money(totals.discount) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Tax</p><p class="text-lg font-semibold">{{ money(totals.tax) }}</p></CardContent></Card>

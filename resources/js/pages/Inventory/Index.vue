@@ -23,6 +23,8 @@ interface ItemRow {
     reorder_level: number;
     is_low: boolean;
     is_negative: boolean;
+    has_expired: boolean;
+    has_expiring: boolean;
     is_active: boolean;
 }
 
@@ -32,12 +34,24 @@ const props = defineProps<{
         links: Array<{ url: string | null; label: string; active: boolean }>;
         total: number;
     };
-    filters: { search: string; sort: string };
+    filters: { search: string; sort: string; filter: string };
+    counts: { all: number; low: number; expiring: number };
     expiryThresholdDays: number;
 }>();
 
 const search = ref(props.filters.search ?? '');
 const sort = ref(props.filters.sort ?? 'low');
+const filter = ref(props.filters.filter ?? 'all');
+
+const filterTabs = computed(() => [
+    { value: 'all', label: 'All', count: props.counts.all },
+    { value: 'low', label: 'Low stock', count: props.counts.low },
+    { value: 'expiring', label: 'Expiring', count: props.counts.expiring },
+]);
+function setFilter(value: string) {
+    filter.value = value;
+    applyFilters();
+}
 
 // Only offer the reorder shortcut to users who can create purchases.
 const canPurchase = computed(() => {
@@ -59,7 +73,7 @@ const sortOptions = [
 ];
 
 function applyFilters() {
-    router.get('/inventory', { search: search.value, sort: sort.value }, { preserveState: true, replace: true });
+    router.get('/inventory', { search: search.value, sort: sort.value, filter: filter.value }, { preserveState: true, replace: true });
 }
 </script>
 
@@ -96,6 +110,23 @@ function applyFilters() {
             <Button type="submit" variant="secondary">Search</Button>
         </form>
 
+        <!-- Quick filters — mirror the Inventory nav badge (reorder + expiring). -->
+        <div class="flex flex-wrap gap-1">
+            <Button
+                v-for="t in filterTabs"
+                :key="t.value"
+                size="sm"
+                :variant="filter === t.value ? 'default' : 'outline'"
+                @click="setFilter(t.value)"
+            >
+                {{ t.label }}
+                <span
+                    class="ml-1.5 rounded-full px-1.5 text-xs tabular-nums"
+                    :class="filter === t.value ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground'"
+                >{{ t.count }}</span>
+            </Button>
+        </div>
+
         <Card class="border-none">
             <CardContent class="p-0">
                 <div class="overflow-x-auto">
@@ -128,10 +159,16 @@ function applyFilters() {
                                 </td>
                                 <td class="px-4 py-2 text-right text-muted-foreground">{{ Number(i.reorder_level) }} <span class="text-xs">{{ i.unit }}</span></td>
                                 <td class="px-4 py-2">
-                                    <Badge v-if="!i.is_active" class="bg-muted text-muted-foreground">Inactive</Badge>
-                                    <Badge v-else-if="i.is_negative" class="bg-rose-600 text-white">Oversold</Badge>
-                                    <Badge v-else-if="i.is_low" variant="destructive">Reorder</Badge>
-                                    <Badge v-else class="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">In stock</Badge>
+                                    <div class="flex flex-wrap gap-1">
+                                        <Badge v-if="!i.is_active" class="bg-muted text-muted-foreground">Inactive</Badge>
+                                        <template v-else>
+                                            <Badge v-if="i.is_negative" class="bg-rose-600 text-white">Oversold</Badge>
+                                            <Badge v-else-if="i.is_low" variant="destructive">Reorder</Badge>
+                                            <Badge v-else class="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">In stock</Badge>
+                                            <Badge v-if="i.has_expired" class="bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">Expired</Badge>
+                                            <Badge v-else-if="i.has_expiring" class="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">Expiring soon</Badge>
+                                        </template>
+                                    </div>
                                 </td>
                             </tr>
                             <tr v-if="items.data.length === 0">

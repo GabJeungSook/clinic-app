@@ -23,12 +23,46 @@ class InventoryController extends Controller
     {
         $search = trim((string) $request->query('search', ''));
         $sort = (string) $request->query('sort', 'low');
+        $filter = (string) $request->query('filter', 'all');
+        $threshold = (int) Settings::get('inventory.expiry_threshold_days', 30);
 
-        $items = InventoryItem::query()
-            ->with('baseUnit:id,abbreviation', 'category:id,name')
+        $today = now()->toDateString();
+        $limit = now()->addDays($threshold)->toDateString();
+
+        // Item ids that hold stock in an already-expired / soon-to-expire batch.
+        $expiredIds = Batch::query()
+            ->where('qty_remaining_cache', '>', 0)
+            ->whereNotNull('expiry_date')
+            ->whereDate('expiry_date', '<', $today)
+            ->distinct()->pluck('inventory_item_id');
+        $expiringIds = Batch::query()
+            ->where('qty_remaining_cache', '>', 0)
+            ->whereNotNull('expiry_date')
+            ->whereDate('expiry_date', '>=', $today)
+            ->whereDate('expiry_date', '<=', $limit)
+            ->distinct()->pluck('inventory_item_id');
+        $alertIds = $expiredIds->concat($expiringIds)->unique()->values();
+
+        // Base query honouring the search box; reused for the tab counts.
+        $base = InventoryItem::query()
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q
                 ->where('name', 'like', "%{$search}%")
                 ->orWhere('sku', 'like', "%{$search}%")));
+
+        $counts = [
+            'all' => (clone $base)->count(),
+            'low' => (clone $base)->whereColumn('stock_on_hand_cache', '<=', 'reorder_level')->count(),
+            'expiring' => (clone $base)->whereIn('id', $alertIds)->count(),
+        ];
+
+        $items = (clone $base)->with('baseUnit:id,abbreviation', 'category:id,name');
+
+        // Tab filter: items needing reorder/oversold, or holding expiring stock.
+        match ($filter) {
+            'low' => $items->whereColumn('stock_on_hand_cache', '<=', 'reorder_level'),
+            'expiring' => $items->whereIn('id', $alertIds),
+            default => $items,
+        };
 
         // Sorting — low stock first by default so items needing attention float up.
         match ($sort) {
@@ -53,13 +87,16 @@ class InventoryController extends Controller
                 'reorder_level' => (float) $i->reorder_level,
                 'is_low' => $i->isLowStock(),
                 'is_negative' => (float) $i->stock_on_hand_cache < 0,
+                'has_expired' => $expiredIds->contains($i->id),
+                'has_expiring' => $expiringIds->contains($i->id),
                 'is_active' => (bool) $i->is_active,
             ]);
 
         return Inertia::render('Inventory/Index', [
             'items' => $items,
-            'filters' => ['search' => $search, 'sort' => $sort],
-            'expiryThresholdDays' => (int) Settings::get('inventory.expiry_threshold_days', 30),
+            'filters' => ['search' => $search, 'sort' => $sort, 'filter' => $filter],
+            'counts' => $counts,
+            'expiryThresholdDays' => $threshold,
         ]);
     }
 

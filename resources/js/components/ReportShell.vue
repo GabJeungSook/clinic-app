@@ -69,23 +69,27 @@ const { activeSection, printAll } = usePrint();
             </div>
         </div>
 
-        <!-- Print/PDF letterhead — a real table so it renders two-column in the
-             PDF (html2canvas does not lay out flexbox/grid). -->
-        <table v-if="activeSection === null" class="print-only report-letterhead">
-            <tbody>
-                <tr>
-                    <td class="report-letterhead__brand">
-                        <span class="report-letterhead__name">{{ clinicName }}</span>
-                        <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
-                    </td>
-                    <td class="report-letterhead__meta">
-                        <span class="report-letterhead__doctype">{{ title }}</span>
-                        <span v-if="subtitle" class="report-letterhead__period">{{ subtitle }}</span>
-                        <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <!-- Print/PDF letterhead + report-title band — real tables/blocks so they
+             render correctly in the PDF (html2canvas does not lay out flex/grid). -->
+        <template v-if="activeSection === null">
+            <table class="print-only report-letterhead">
+                <tbody>
+                    <tr>
+                        <td class="report-letterhead__brand">
+                            <span class="report-letterhead__name">{{ clinicName }}</span>
+                            <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
+                        </td>
+                        <td class="report-letterhead__meta">
+                            <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="print-only report-title">
+                <span class="report-title__name">{{ title }}</span>
+                <span v-if="subtitle" class="report-title__period">{{ subtitle }}</span>
+            </div>
+        </template>
 
         <!-- On-screen title -->
         <div class="no-print">
@@ -94,5 +98,23 @@ const { activeSection, printAll } = usePrint();
         </div>
 
         <slot />
+
+        <!-- Sign-off block (print/PDF only) -->
+        <table v-if="activeSection === null" class="print-only report-signoff">
+            <tbody>
+                <tr>
+                    <td>
+                        <div class="report-signoff__line"></div>
+                        <p class="report-signoff__role">Prepared by</p>
+                        <p class="report-signoff__cap">Signature over printed name &amp; date</p>
+                    </td>
+                    <td>
+                        <div class="report-signoff__line"></div>
+                        <p class="report-signoff__role">Approved by</p>
+                        <p class="report-signoff__cap">Signature over printed name &amp; date</p>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 </template>

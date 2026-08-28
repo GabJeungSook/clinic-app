@@ -22,7 +22,7 @@ const maxStatus = computed(() => Math.max(1, ...props.statusCounts.map((s) => s.
 <template>
     <Head title="Appointments report" />
     <ReportShell title="Appointments report" subtitle="Last 30 days" :meta="meta">
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div class="report-kpis grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Booked</p><p class="text-2xl font-semibold">{{ totals.total }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Completed</p><p class="text-2xl font-semibold">{{ totals.completed }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">No-shows</p><p class="text-2xl font-semibold">{{ totals.no_show }}</p></CardContent></Card>

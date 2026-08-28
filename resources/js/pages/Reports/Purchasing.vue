@@ -40,7 +40,7 @@ const applyRange = () => router.get('/reports/purchasing', { from: from.value, t
         </div>
 
         <!-- Totals -->
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div class="report-kpis grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Total spend</p><p class="text-2xl font-semibold">{{ money(totals.spend) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Purchases</p><p class="text-2xl font-semibold">{{ totals.count }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Suppliers</p><p class="text-2xl font-semibold">{{ totals.suppliers }}</p></CardContent></Card>
