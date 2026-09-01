@@ -15,6 +15,7 @@ enum ItemType: string
     case Product = 'product';
     case Retail = 'retail';
     case Medication = 'medication';
+    case Other = 'other';
 
     public function label(): string
     {
@@ -23,6 +24,7 @@ enum ItemType: string
             self::Product => 'Clinical product',
             self::Retail => 'Retail product',
             self::Medication => 'Medication',
+            self::Other => 'Other',
         };
     }
 }

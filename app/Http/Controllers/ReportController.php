@@ -9,6 +9,7 @@ use App\Enums\PurchaseStatus;
 use App\Enums\SessionStatus;
 use App\Models\Appointment;
 use App\Models\Batch;
+use App\Models\Expense;
 use App\Models\InventoryItem;
 use App\Models\Invoice;
 use App\Models\Patient;
@@ -61,11 +62,15 @@ class ReportController extends Controller
         // Daily buckets for shorter spans, monthly for anything longer.
         $daily = $from->diffInDays($to) <= 62;
         $buckets = [];
+        // NB: custom-range dates come from $request->date(), which returns
+        // CarbonImmutable (Date::use in AppServiceProvider). Reassign the cursor
+        // each step — calling addDay()/addMonth() on an immutable value returns a
+        // new instance without mutating in place, so an in-place loop never ends.
         $cursor = $from->copy();
         if ($daily) {
             while ($cursor->lte($to)) {
                 $buckets[] = ['key' => $cursor->toDateString(), 'label' => $cursor->format('M j')];
-                $cursor->addDay();
+                $cursor = $cursor->addDay();
             }
             $grouped = $payments->groupBy(fn ($p) => $p->paid_at->toDateString());
         } else {
@@ -73,7 +78,7 @@ class ReportController extends Controller
             $endMonth = $to->copy()->startOfMonth();
             while ($cursor->lte($endMonth)) {
                 $buckets[] = ['key' => $cursor->format('Y-m'), 'label' => $cursor->format('M Y')];
-                $cursor->addMonthNoOverflow();
+                $cursor = $cursor->addMonthNoOverflow();
             }
             $grouped = $payments->groupBy(fn ($p) => $p->paid_at->format('Y-m'));
         }
@@ -167,6 +172,20 @@ class ReportController extends Controller
             ->sortByDesc('total')
             ->values();
 
+        // Profitability: cost of the services actually delivered in the period
+        // (completed sessions × the service's per-session cost) and cash expenses,
+        // so the clinic sees gross vs net sales and net profit.
+        $grand = (float) $invoices->sum(fn ($i) => (float) $i->grand_total);
+        $costServices = (float) TreatmentSession::query()
+            ->where('status', SessionStatus::Completed)
+            ->whereBetween('performed_at', [$from, $to])
+            ->with('service:id,cost')
+            ->get()
+            ->sum(fn ($s) => (float) ($s->service?->cost ?? 0));
+        $expensesTotal = (float) Expense::query()
+            ->whereBetween('spent_at', [$from, $to])
+            ->sum('amount');
+
         return Inertia::render('Reports/Sales', [
             'meta' => $this->meta(),
             'preset' => $preset,
@@ -187,9 +206,13 @@ class ReportController extends Controller
                 'subtotal' => (float) $invoices->sum(fn ($i) => (float) $i->subtotal),
                 'discount' => (float) $invoices->sum(fn ($i) => (float) $i->discount_total),
                 'tax' => (float) $invoices->sum(fn ($i) => (float) $i->tax_total),
-                'grand' => (float) $invoices->sum(fn ($i) => (float) $i->grand_total),
+                'grand' => $grand,
                 'collected' => (float) $invoices->sum(fn ($i) => (float) $i->amount_paid),
                 'outstanding' => (float) $invoices->sum(fn ($i) => $i->amountDue()),
+                'cost_services' => $costServices,
+                'net_sales' => round($grand - $costServices, 2),
+                'expenses' => $expensesTotal,
+                'net_profit' => round($grand - $costServices - $expensesTotal, 2),
             ],
             'byStatus' => $byStatus,
             'byMethod' => $byMethod,
@@ -207,6 +230,65 @@ class ReportController extends Controller
                 'paid' => (float) $i->amount_paid,
                 'due' => $i->amountDue(),
                 'methods' => $i->payments->where('amount', '>', 0)->map(fn ($p) => $p->method->label())->unique()->values()->all(),
+            ]),
+        ]);
+    }
+
+    public function expenses(Request $request): Response
+    {
+        // Cash expenses in the period — total, split by category, and the ledger.
+        $preset = (string) $request->query('preset', 'month');
+
+        [$from, $to] = match ($preset) {
+            'today' => [Carbon::today()->startOfDay(), Carbon::today()->endOfDay()],
+            'week' => [Carbon::today()->startOfWeek(), Carbon::today()->endOfWeek()],
+            'year' => [Carbon::today()->startOfYear(), Carbon::today()->endOfYear()],
+            'custom' => [
+                ($request->date('from') ?? Carbon::today()->subDays(29))->startOfDay(),
+                ($request->date('to') ?? Carbon::today())->endOfDay(),
+            ],
+            default => [Carbon::today()->startOfMonth(), Carbon::today()->endOfMonth()],
+        };
+
+        $expenses = Expense::query()
+            ->whereBetween('spent_at', [$from, $to])
+            ->with('recorder:id,name')
+            ->latest('spent_at')
+            ->latest('created_at')
+            ->get();
+
+        $byCategory = $expenses
+            ->groupBy(fn (Expense $e) => $e->category ?: 'Uncategorized')
+            ->map(fn ($rows, $cat) => ['label' => (string) $cat, 'value' => (float) $rows->sum('amount')])
+            ->sortByDesc('value')
+            ->values();
+
+        return Inertia::render('Reports/Expenses', [
+            'meta' => $this->meta(),
+            'preset' => $preset,
+            'range' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'label' => $from->format('F j, Y') . ' – ' . $to->format('F j, Y'),
+            ],
+            'presets' => [
+                ['value' => 'today', 'label' => 'Today'],
+                ['value' => 'week', 'label' => 'This week'],
+                ['value' => 'month', 'label' => 'This month'],
+                ['value' => 'year', 'label' => 'This year'],
+                ['value' => 'custom', 'label' => 'Custom range'],
+            ],
+            'totals' => [
+                'total' => (float) $expenses->sum('amount'),
+                'count' => $expenses->count(),
+            ],
+            'byCategory' => $byCategory,
+            'ledger' => $expenses->map(fn (Expense $e) => [
+                'spent_at' => $e->spent_at?->format('F j, Y'),
+                'description' => $e->description,
+                'category' => $e->category,
+                'by' => $e->recorder?->name,
+                'amount' => (float) $e->amount,
             ]),
         ]);
     }

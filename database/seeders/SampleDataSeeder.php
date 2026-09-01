@@ -14,11 +14,14 @@ use App\Enums\AppointmentStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\ItemType;
 use App\Enums\MedicalHistoryType;
+use App\Enums\FaceShape;
 use App\Enums\PaymentMethod;
 use App\Enums\PurchaseStatus;
 use App\Enums\Role as RoleEnum;
+use App\Enums\SkinType;
 use App\Models\Appointment;
 use App\Models\Branch;
+use App\Models\Expense;
 use App\Models\InventoryCategory;
 use App\Models\InventoryItem;
 use App\Models\Patient;
@@ -28,6 +31,7 @@ use App\Models\Supplier;
 use App\Models\Unit;
 use App\Models\User;
 use App\Support\Branches\CurrentBranch;
+use App\Support\Chart\ChartOptions;
 use App\Support\DocumentNumber;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Seeder;
@@ -56,11 +60,15 @@ class SampleDataSeeder extends Seeder
         $this->staff = $this->makeStaff();
         $this->makeInventory();
         $this->makePurchases();
+        $this->makeSupplierCoverage();
         $this->attachBillsOfMaterials();
+        $this->setServiceCosts();
         $patients = $this->makePatients();
         $this->makeTreatmentsAndBilling($patients);
+        $this->makeExtraCourses($patients);
         $this->makeRetailSales($patients);
         $this->makeAppointments($patients);
+        $this->makeExpenses();
     }
 
     private function ensureFoundation(): void
@@ -293,6 +301,8 @@ class SampleDataSeeder extends Seeder
                 'last_name' => fake()->lastName(),
                 'date_of_birth' => fake()->dateTimeBetween('-55 years', '-19 years')->format('Y-m-d'),
                 'sex' => fake()->randomElement(['male', 'female', 'female', 'female']),
+                'occupation' => fake()->jobTitle(),
+                'civil_status' => fake()->randomElement(['Single', 'Married', 'Widowed', 'Separated']),
                 'phone' => '09' . fake()->numerify('## ### ####'),
                 'email' => fake()->optional(0.5)->safeEmail(),
                 'created_at' => now()->subDays(rand(1, 60)),
@@ -307,10 +317,226 @@ class SampleDataSeeder extends Seeder
                 ]);
             }
 
+            // Most patients get a populated clinical chart so demos aren't empty.
+            if ($i % 6 !== 0) {
+                $this->makeChart($p);
+            }
+
             $patients[] = $p;
         }
 
         return $patients;
+    }
+
+    /** Populate a realistic clinical chart for the given patient. */
+    private function makeChart(Patient $patient): void
+    {
+        $pickKeys = fn (array $map, int $max) => (array) fake()->randomElements(
+            array_keys($map),
+            rand(0, min($max, count($map))),
+        );
+
+        $procedures = [];
+        foreach (array_keys(ChartOptions::PROCEDURES) as $key) {
+            $done = fake()->boolean(30);
+            $procedures[$key] = [
+                'done' => $done,
+                'when' => $done ? fake()->dateTimeBetween('-3 years', '-1 month')->format('Y-m-d') : null,
+            ];
+        }
+
+        $patient->chart()->create([
+            'history_flags' => [
+                'have' => $pickKeys(ChartOptions::HAVE, 2),
+                'have_others' => null,
+                'taking' => $pickKeys(ChartOptions::TAKING, 1),
+                'taking_others' => null,
+                'condition' => $pickKeys(ChartOptions::CONDITION, 1),
+                'condition_others' => null,
+            ],
+            'procedures_done' => $procedures,
+            'lifestyle' => [
+                'avg_sleep' => rand(5, 8) . ' hours',
+                'eating_habits' => fake()->randomElement(['Balanced diet', 'High sugar intake', 'Vegetarian', 'Irregular meals']),
+                'exercise' => fake()->boolean(),
+                'past_medical_history' => fake()->optional(0.4)->sentence(),
+                'previous_surgery' => fake()->optional(0.2)->sentence(),
+            ],
+            'derma_history' => [
+                'had_consult' => $consult = fake()->boolean(40),
+                'reason' => $consult ? fake()->randomElement(['Acne management', 'Anti-aging', 'Pigmentation concerns']) : null,
+                'when' => $consult ? fake()->dateTimeBetween('-2 years', '-1 month')->format('Y-m-d') : null,
+            ],
+            'initial_plan' => [
+                'items' => $pickKeys(ChartOptions::INITIAL_PLAN, 3),
+                'items_others' => null,
+            ],
+            'physician_notes' => [[
+                'observations' => fake()->sentence(),
+                'test_ordered' => fake()->optional(0.3)->randomElement(['Skin analysis', 'Patch test']),
+                'results' => fake()->optional(0.3)->randomElement(['Normal', 'Mild sensitivity']),
+                'additional_notes' => fake()->optional(0.5)->sentence(),
+            ]],
+            'assessment_conditions' => [
+                'conditions' => $pickKeys(ChartOptions::ASSESSMENT, 4),
+                'conditions_others' => null,
+            ],
+            'beauty_plan' => [
+                ['procedure' => 'Facial Peel', 'price' => 3500, 'timeline' => 'Monthly'],
+                ['procedure' => fake()->randomElement(['Microneedling', 'HIFU Face Sculpt', 'Rejuran H']), 'price' => rand(8, 25) * 1000, 'timeline' => fake()->randomElement(['3 sessions', '6 months', 'Quarterly'])],
+            ],
+            'skin_type' => fake()->randomElement(SkinType::cases())->value,
+            'face_shape' => fake()->randomElement(FaceShape::cases())->value,
+            'findings' => fake()->optional(0.7)->paragraph(),
+            'medical_record' => fake()->optional(0.8)->paragraphs(2, true),
+            'procedures_notes' => fake()->optional(0.5)->sentence(),
+            'lifestyle_notes' => fake()->optional(0.5)->sentence(),
+            'initial_plan_notes' => fake()->optional(0.5)->sentence(),
+            'assessment_notes' => fake()->optional(0.5)->sentence(),
+            'beauty_plan_notes' => fake()->optional(0.5)->sentence(),
+        ]);
+    }
+
+    /** Give every service a per-session cost (~30–45% of its price) for gross/net reporting. */
+    private function setServiceCosts(): void
+    {
+        foreach (Service::query()->get() as $service) {
+            if ((float) $service->cost > 0) {
+                continue;
+            }
+            $perSession = (float) $service->default_price / max(1, (int) $service->default_session_count);
+            $service->cost = round($perSession * fake()->randomFloat(2, 0.30, 0.45), 2);
+            $service->save();
+        }
+    }
+
+    /** Attach a supplier to every item that has no purchase history yet (via an ordered PO — no stock change). */
+    private function makeSupplierCoverage(): void
+    {
+        $suppliers = Supplier::query()->orderBy('name')->get();
+        if ($suppliers->isEmpty()) {
+            return;
+        }
+
+        $items = InventoryItem::query()->whereDoesntHave('purchaseItems')->get()->values();
+        $bySupplier = [];
+        foreach ($items as $idx => $item) {
+            $bySupplier[$suppliers[$idx % $suppliers->count()]->id][] = $item;
+        }
+
+        foreach ($bySupplier as $supplierId => $group) {
+            $purchase = Purchase::create([
+                'supplier_id' => $supplierId,
+                'reference_no' => DocumentNumber::next(Purchase::query(), 'PO', 'reference_no'),
+                'status' => PurchaseStatus::Ordered,
+                'ordered_at' => now()->subDays(rand(2, 20)),
+                'created_by' => $this->staff[2]->id ?? null,
+            ]);
+            foreach ($group as $item) {
+                $purchase->items()->create([
+                    'inventory_item_id' => $item->id,
+                    'quantity' => (float) $item->reorder_qty > 0 ? (float) $item->reorder_qty : 10,
+                    'unit_id' => $item->base_unit_id,
+                    'unit_cost' => 100,
+                ]);
+            }
+        }
+    }
+
+    /** Give the first few patients extra treatment courses so some have multiple services. */
+    private function makeExtraCourses(array $patients): void
+    {
+        $names = [
+            'Diode Hair Removal – Legs', 'HIFU Face Sculpt', 'Microneedling', 'Rejuran H',
+            'Botox – Forehead', 'Lip Filler', 'Pico Freckle Refinement', 'Mesoheal – Korean Glow',
+        ];
+        $services = Service::query()->whereIn('name', $names)->get()->keyBy('name');
+        if ($services->isEmpty()) {
+            return;
+        }
+
+        $notes = [
+            'Patient tolerated the procedure well. No adverse reactions noted.',
+            'Mild erythema post-treatment; advised cold compress and sun protection.',
+            'Visible improvement since last session. Continuing the planned schedule.',
+            'Good response. Recommended hydrating serum and daily SPF for aftercare.',
+            'Reduced redness compared to the previous visit. Patient happy with progress.',
+        ];
+
+        $purchaseCourse = app(PurchaseTreatmentCourse::class);
+        $startSession = app(StartTreatmentSession::class);
+        $completeSession = app(CompleteTreatmentSession::class);
+        $createInvoice = app(CreateInvoice::class);
+        $recordPayment = app(RecordPayment::class);
+        $generateReceipt = app(GenerateReceipt::class);
+
+        foreach (array_slice($patients, 0, 6) as $patient) {
+            foreach (collect($names)->shuffle()->take(rand(1, 2)) as $name) {
+                $service = $services[$name] ?? null;
+                if (! $service) {
+                    continue;
+                }
+
+                $sessions = rand(1, 6);
+                $perSession = (float) $service->default_price / max(1, (int) $service->default_session_count);
+                $price = round($perSession * $sessions, 2);
+                $purchasedAt = now()->subDays(rand(3, 40));
+                $course = $purchaseCourse->handle($patient, $service, totalSessions: $sessions, price: $price, purchasedAt: $purchasedAt);
+
+                $performer = $this->staff[array_rand($this->staff)]->id;
+                for ($n = 0; $n < rand(1, $sessions); $n++) {
+                    $performedAt = (clone $purchasedAt)->addDays($n * rand(7, 14))->setTime(rand(9, 16), rand(0, 3) * 15);
+                    if ($performedAt->isFuture()) {
+                        break;
+                    }
+                    $session = $startSession->handle($patient, $service, $course, performedBy: $performer);
+                    $completeSession->handle($session, performedBy: $performer, consumptionOverrides: [], allowOverride: true, performedAt: $performedAt);
+                    $session->update(['clinical_notes' => $notes[array_rand($notes)]]);
+                }
+
+                $invoice = $createInvoice->handle(
+                    $patient,
+                    [['description' => $course->name_snapshot, 'quantity' => 1, 'unit_price' => $price, 'itemable' => $course]],
+                    status: InvoiceStatus::Unpaid,
+                    createdBy: $performer,
+                    issuedAt: $purchasedAt,
+                );
+                if (rand(1, 10) <= 7) {
+                    $recordPayment->handle($invoice, (float) $invoice->grand_total, PaymentMethod::Cash, receivedBy: $performer, paidAt: $purchasedAt);
+                    $generateReceipt->handle($invoice->fresh());
+                }
+            }
+        }
+    }
+
+    /** Some register cash-outs so the Expenses page and profitability have data. */
+    private function makeExpenses(): void
+    {
+        if (Expense::query()->exists()) {
+            return;
+        }
+
+        $recordedBy = $this->staff[2]->id ?? ($this->staff[0]->id ?? null);
+        $defs = [
+            ['Bought alcohol & cotton', 'Supplies', 850],
+            ['Lunch for staff', 'Food/Meals', 620],
+            ['Grab delivery of supplies', 'Transport', 240],
+            ['Aircon cleaning', 'Maintenance', 1500],
+            ['Water refill', 'Utilities', 90],
+            ['Printer ink', 'Supplies', 780],
+            ['Load for clinic phone', 'Utilities', 300],
+            ['Cleaning supplies', 'Supplies', 450],
+            ['Staff merienda', 'Food/Meals', 380],
+        ];
+        foreach ($defs as $i => [$description, $category, $amount]) {
+            Expense::create([
+                'description' => $description,
+                'category' => $category,
+                'amount' => $amount,
+                'spent_at' => now()->subDays($i * 3),
+                'recorded_by' => $recordedBy,
+            ]);
+        }
     }
 
     /** @param array<int, Patient> $patients */
@@ -356,6 +582,12 @@ class SampleDataSeeder extends Seeder
                 }
                 $session = $startSession->handle($patient, $service, $course, performedBy: $performer);
                 $completeSession->handle($session, performedBy: $performer, allowOverride: true, performedAt: $performedAt);
+                $session->update(['clinical_notes' => fake()->randomElement([
+                    'Patient tolerated the procedure well. No adverse reactions.',
+                    'Mild redness post-treatment, advised cold compress and sunblock.',
+                    'Good progress noted. Continue with the planned schedule.',
+                    'Slight discomfort during session; settled quickly afterwards.',
+                ])]);
             }
 
             // Invoice the course; most are paid (some partially / unpaid).

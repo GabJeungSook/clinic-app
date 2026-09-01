@@ -3,6 +3,7 @@
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\ClinicSettingsController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\InventoryCategoryController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\StocktakeController;
@@ -48,6 +49,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('patients', PatientController::class);
         Route::post('patients/{patient}/histories', [PatientController::class, 'storeHistory'])
             ->name('patients.histories.store');
+        Route::match(['put', 'patch'], 'patients/{patient}/chart', [PatientController::class, 'updateChart'])
+            ->name('patients.chart.update');
     });
 
     // Appointments / booking
@@ -65,11 +68,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('can:reports.view')->group(function () {
         Route::get('reports/revenue', [ReportController::class, 'revenue'])->name('reports.revenue');
         Route::get('reports/sales', [ReportController::class, 'sales'])->name('reports.sales');
+        Route::get('reports/expenses', [ReportController::class, 'expenses'])->name('reports.expenses');
         Route::get('reports/appointments', [ReportController::class, 'appointments'])->name('reports.appointments');
         Route::get('reports/patients', [ReportController::class, 'patients'])->name('reports.patients');
         Route::get('reports/treatments', [ReportController::class, 'treatments'])->name('reports.treatments');
         Route::get('reports/inventory', [ReportController::class, 'inventory'])->name('reports.inventory');
         Route::get('reports/purchasing', [ReportController::class, 'purchasing'])->name('reports.purchasing');
+    });
+
+    // Expenses — register cash-outs. View is broad; create/delete needs manage.
+    Route::middleware('can:expenses.view')->group(function () {
+        Route::get('expenses', [ExpenseController::class, 'index'])->name('expenses.index');
+        Route::post('expenses', [ExpenseController::class, 'store'])->name('expenses.store');
+        Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])->name('expenses.destroy');
     });
 
     // Services + Bill of Materials

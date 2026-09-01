@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, useForm, Link } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,11 +10,19 @@ import SearchSelect from '@/components/SearchSelect.vue';
 
 defineOptions({ layout: { breadcrumbs: [{ title: 'Inventory', href: '/inventory' }, { title: 'New item', href: '#' }] } });
 
-defineProps<{
+const props = defineProps<{
     categories: Array<{ value: string; label: string }>;
     units: Array<{ value: string; label: string }>;
     types: Array<{ value: string; label: string }>;
 }>();
+
+const NEW_CATEGORY = '__new__';
+const categoryOptions = computed(() => [...props.categories, { value: NEW_CATEGORY, label: '+ Add new category…' }]);
+const categoryChoice = ref('');
+watch(categoryChoice, (v) => {
+    if (v === NEW_CATEGORY) form.inventory_category_id = '';
+    else { form.inventory_category_id = v; form.new_category = ''; }
+});
 
 const form = useForm({
     name: '',
@@ -21,6 +30,7 @@ const form = useForm({
     barcode: '',
     type: 'consumable',
     inventory_category_id: '',
+    new_category: '',
     base_unit_id: '',
     is_batch_tracked: true,
     track_expiry: true,
@@ -54,7 +64,8 @@ const submit = () => form.post('/inventory');
                     </div>
                     <div class="grid gap-1.5">
                         <Label>Category</Label>
-                        <SearchSelect v-model="form.inventory_category_id" :options="categories" placeholder="—" empty-label="—" />
+                        <SearchSelect v-model="categoryChoice" :options="categoryOptions" placeholder="—" empty-label="—" />
+                        <Input v-if="categoryChoice === NEW_CATEGORY" v-model="form.new_category" placeholder="New category name" />
                     </div>
                     <div class="grid gap-1.5">
                         <Label>Base unit *</Label>

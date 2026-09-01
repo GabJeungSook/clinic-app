@@ -19,6 +19,7 @@ interface ConsumableOpt { value: string; label: string; base_unit_id: string; on
 interface Consumable { inventory_item_id: string; quantity: number; unit_id: string }
 interface ServiceLine { service_id: string; course_id: string; sessions: number; price: number; discount: number; promotion_id: string; notes: string; consumables: Consumable[] }
 interface RetailLine { inventory_item_id: string; label: string; unit: string; quantity: number; unit_price: number; discount: number; on_hand: number; is_low: boolean }
+interface FreebieLine { inventory_item_id: string; label: string; unit: string; quantity: number; on_hand: number; is_low: boolean }
 interface ManualLine { description: string; quantity: number; unit_price: number; discount: number }
 interface PaymentLine { method: string; amount: number; reference: string }
 
@@ -46,9 +47,11 @@ const consumableById = computed(() => Object.fromEntries(props.consumableItems.m
 const form = useForm({
     patient_id: props.preselectedPatient ?? '',
     invoice_promotion_id: '',
+    invoice_discount: 0,
     notes: '',
     services: [] as ServiceLine[],
     retail: [] as RetailLine[],
+    freebies: [] as FreebieLine[],
     manual: [] as ManualLine[],
     payments: [] as PaymentLine[],
     generate_receipt: true,
@@ -143,6 +146,22 @@ const retailRowError = (l: RetailLine) => Number(l.quantity) > l.on_hand;
 const retailRowWarn = (l: RetailLine) => !retailRowError(l) && (l.is_low || Number(l.quantity) >= l.on_hand);
 const retailOk = computed(() => form.retail.every((l) => !retailRowError(l)));
 
+// ── Freebies — given free (₱0) but still deducted from stock ──────────────────
+const freebieError = ref('');
+function addFreebie(itemId: string) {
+    const it = itemsById.value[itemId];
+    if (!it) return;
+    if (it.on_hand <= 0) {
+        freebieError.value = `${it.label} is out of stock.`;
+        return;
+    }
+    freebieError.value = '';
+    form.freebies.push({ inventory_item_id: it.value, label: it.label, unit: it.unit ?? '', quantity: 1, on_hand: it.on_hand, is_low: it.is_low });
+}
+const removeFreebie = (i: number) => form.freebies.splice(i, 1);
+const freebieRowError = (l: FreebieLine) => Number(l.quantity) > l.on_hand;
+const freebieOk = computed(() => form.freebies.every((l) => !freebieRowError(l)));
+
 // ── Manual lines ─────────────────────────────────────────────────────────────
 const addManual = () => form.manual.push({ description: '', quantity: 1, unit_price: 0, discount: 0 });
 const removeManual = (i: number) => form.manual.splice(i, 1);
@@ -153,11 +172,13 @@ const subtotal = computed(() =>
     form.services.reduce((s, l) => s + serviceLineNet(l), 0) +
     form.retail.reduce((s, l) => s + lineNet(l.quantity, l.unit_price, l.discount), 0) +
     form.manual.reduce((s, l) => s + lineNet(l.quantity, l.unit_price, l.discount), 0));
+const invoiceDiscount = computed(() => Math.min(Math.max(0, Number(form.invoice_discount) || 0), subtotal.value));
+const discountedSubtotal = computed(() => Math.max(0, subtotal.value - invoiceDiscount.value));
 const tax = computed(() => {
-    if (!props.tax.enabled || subtotal.value <= 0) return 0;
-    return props.tax.inclusive ? subtotal.value - subtotal.value / (1 + props.tax.rate / 100) : (subtotal.value * props.tax.rate) / 100;
+    if (!props.tax.enabled || discountedSubtotal.value <= 0) return 0;
+    return props.tax.inclusive ? discountedSubtotal.value - discountedSubtotal.value / (1 + props.tax.rate / 100) : (discountedSubtotal.value * props.tax.rate) / 100;
 });
-const grand = computed(() => (props.tax.enabled && !props.tax.inclusive ? subtotal.value + tax.value : subtotal.value));
+const grand = computed(() => (props.tax.enabled && !props.tax.inclusive ? discountedSubtotal.value + tax.value : discountedSubtotal.value));
 
 // ── Payments (split) ─────────────────────────────────────────────────────────
 const paid = computed(() => form.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
@@ -168,14 +189,15 @@ const removePayment = (i: number) => form.payments.splice(i, 1);
 
 // ── Guards + submit ──────────────────────────────────────────────────────────
 const requiresPatient = computed(() => form.services.length > 0);
-const hasLines = computed(() => form.services.length + form.retail.length + form.manual.length > 0);
-const canSubmit = computed(() => hasLines.value && retailOk.value && !(requiresPatient.value && !form.patient_id));
+const hasLines = computed(() => form.services.length + form.retail.length + form.freebies.length + form.manual.length > 0);
+const canSubmit = computed(() => hasLines.value && retailOk.value && freebieOk.value && !(requiresPatient.value && !form.patient_id));
 
 function submit() {
     form
         .transform((data) => ({
             patient_id: data.patient_id || null,
             invoice_promotion_id: data.invoice_promotion_id || null,
+            invoice_discount: Number(data.invoice_discount) || 0,
             notes: data.notes || null,
             line_groups: {
                 services: data.services
@@ -193,6 +215,9 @@ function submit() {
                 retail: data.retail
                     .filter((l) => l.inventory_item_id)
                     .map((l) => ({ inventory_item_id: l.inventory_item_id, quantity: Number(l.quantity) || 0, unit_price: Number(l.unit_price) || 0, discount: Number(l.discount) || 0 })),
+                freebies: data.freebies
+                    .filter((l) => l.inventory_item_id && Number(l.quantity) > 0)
+                    .map((l) => ({ inventory_item_id: l.inventory_item_id, quantity: Number(l.quantity) || 0 })),
                 manual: data.manual
                     .filter((l) => l.description && Number(l.quantity) > 0)
                     .map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, unit_price: Number(l.unit_price) || 0, discount: Number(l.discount) || 0 })),
@@ -368,6 +393,39 @@ onMounted(() => {
             </CardContent>
         </Card>
 
+        <!-- Freebies -->
+        <Card class="border-none">
+            <CardHeader class="py-3">
+                <CardTitle class="text-base">Freebies <span class="text-xs font-normal text-muted-foreground">— given free, still deducted from stock</span></CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <div class="grid gap-1.5">
+                    <Label>Add a freebie</Label>
+                    <SearchSelect model-value="" :options="retailPicker" placeholder="Select a product to give free…" @update:model-value="(v) => v && addFreebie(String(v))" />
+                    <p v-if="freebieError" class="text-xs text-rose-600">{{ freebieError }}</p>
+                    <p v-else class="text-xs text-muted-foreground">Billed at ₱0 (not added to the payment) but still deducted from inventory.</p>
+                </div>
+                <div v-if="form.freebies.length" class="overflow-x-auto rounded-lg border">
+                    <table class="w-full text-sm">
+                        <thead class="bg-muted/40 text-left text-muted-foreground">
+                            <tr><th class="px-2 py-2 font-medium">Product</th><th class="px-2 py-2 font-medium">Qty</th><th class="px-2 py-2 text-right font-medium">Value</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(l, i) in form.freebies" :key="i" class="border-t">
+                                <td class="px-2 py-1.5">
+                                    {{ l.label }} <span v-if="l.unit" class="text-xs text-muted-foreground">/ {{ l.unit }}</span>
+                                    <span v-if="freebieRowError(l)" class="block text-xs text-rose-600"><AlertTriangle class="inline size-3" /> only {{ l.on_hand }} in stock</span>
+                                </td>
+                                <td class="px-2 py-1.5"><Input type="number" step="0.001" min="0" :max="l.on_hand" class="h-8 w-20" v-model="l.quantity" /></td>
+                                <td class="px-2 py-1.5 text-right font-medium text-emerald-600">FREE</td>
+                                <td class="px-2 py-1.5"><Button type="button" variant="ghost" size="icon-sm" @click="removeFreebie(i)"><Trash2 class="size-4 text-rose-600" /></Button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </CardContent>
+        </Card>
+
         <!-- Manual lines -->
         <Card class="border-none">
             <CardHeader class="flex flex-row items-center justify-between py-3">
@@ -400,9 +458,15 @@ onMounted(() => {
         <Card class="border-none">
             <CardContent class="grid gap-6 p-4 lg:grid-cols-2">
                 <div class="grid gap-3">
-                    <div class="grid gap-1.5">
-                        <Label>Whole-invoice promotion</Label>
-                        <SearchSelect v-model="form.invoice_promotion_id" :options="promotions" placeholder="— none —" empty-label="— none —" />
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-1.5">
+                            <Label>Whole-invoice promotion</Label>
+                            <SearchSelect v-model="form.invoice_promotion_id" :options="promotions" placeholder="— none —" empty-label="— none —" />
+                        </div>
+                        <div class="grid gap-1.5">
+                            <Label>Discount (whole order)</Label>
+                            <Input type="number" step="0.01" min="0" v-model="form.invoice_discount" placeholder="0.00" />
+                        </div>
                     </div>
                     <div class="grid gap-1.5">
                         <Label>Notes</Label>
@@ -433,12 +497,13 @@ onMounted(() => {
                 <div class="flex flex-col justify-between gap-3 rounded-lg bg-muted/40 p-4">
                     <div class="space-y-1 text-sm">
                         <div class="flex justify-between"><span class="text-muted-foreground">Subtotal</span><span>{{ money(subtotal) }}</span></div>
+                        <div v-if="invoiceDiscount > 0" class="flex justify-between text-rose-600"><span>Discount</span><span>−{{ money(invoiceDiscount) }}</span></div>
                         <div v-if="props.tax.enabled" class="flex justify-between"><span class="text-muted-foreground">Tax ({{ props.tax.rate }}%{{ props.tax.inclusive ? ' incl' : '' }})</span><span>{{ money(tax) }}</span></div>
                         <div class="flex justify-between border-t pt-1 text-lg font-semibold"><span>Total</span><span>{{ money(grand) }}</span></div>
                         <div class="flex justify-between"><span class="text-muted-foreground">Paid</span><span>{{ money(paid) }}</span></div>
                         <div class="flex justify-between font-medium" :class="balance > 0 ? 'text-amber-600' : 'text-emerald-600'"><span>Balance</span><span>{{ money(balance) }}</span></div>
                     </div>
-                    <p v-if="!retailOk" class="text-xs text-rose-600">A retail line exceeds available stock — reduce the quantity.</p>
+                    <p v-if="!retailOk || !freebieOk" class="text-xs text-rose-600">A line exceeds available stock — reduce the quantity.</p>
                     <Button type="button" class="w-full" :disabled="form.processing || !canSubmit" @click="submit">Complete checkout</Button>
                 </div>
             </CardContent>

@@ -22,6 +22,10 @@ class NativeAppServiceProvider implements ProvidesPhpIni
     public function boot(): void
     {
         try {
+            // The startup loading window (with progress bar) is handled at the
+            // Electron level so it appears the instant the app launches, before
+            // PHP is even serving — see the desktop runtime's main entry. Here we
+            // just open the app's main window once PHP has booted.
             Window::open('main')
                 ->title('Skinthera Medical Aesthetic')
                 ->hideMenu()          // removes the File/Edit/View menu bar

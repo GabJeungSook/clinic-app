@@ -23,6 +23,7 @@ class StoreServiceRequest extends FormRequest
             'description' => ['nullable', 'string'],
             'default_session_count' => ['required', 'integer', 'min:1', 'max:100'],
             'default_price' => ['required', 'numeric', 'min:0'],
+            'cost' => ['nullable', 'numeric', 'min:0'],
             'default_interval_days' => ['nullable', 'integer', 'min:0'],
             'duration_minutes' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['boolean'],

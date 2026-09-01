@@ -55,7 +55,15 @@ class InventoryController extends Controller
             'expiring' => (clone $base)->whereIn('id', $alertIds)->count(),
         ];
 
-        $items = (clone $base)->with('baseUnit:id,abbreviation', 'category:id,name');
+        $items = (clone $base)->with([
+            'baseUnit:id,abbreviation',
+            'category:id,name',
+            // For the "Supplier" column: the vendor we most recently purchased
+            // each item from (derived from purchase history — items have no
+            // direct supplier link).
+            'purchaseItems.purchase:id,supplier_id,ordered_at',
+            'purchaseItems.purchase.supplier:id,name',
+        ]);
 
         // Tab filter: items needing reorder/oversold, or holding expiring stock.
         match ($filter) {
@@ -83,6 +91,9 @@ class InventoryController extends Controller
                 'type_label' => $i->type->label(),
                 'unit' => $i->baseUnit?->abbreviation,
                 'category' => $i->category?->name,
+                'supplier' => $i->purchaseItems
+                    ->sortByDesc(fn ($pi) => $pi->purchase?->ordered_at)
+                    ->first()?->purchase?->supplier?->name,
                 'on_hand' => (float) $i->stock_on_hand_cache,
                 'reorder_level' => (float) $i->reorder_level,
                 'is_low' => $i->isLowStock(),
@@ -107,7 +118,7 @@ class InventoryController extends Controller
 
     public function store(StoreInventoryItemRequest $request, ReceiveStock $receiveStock): RedirectResponse
     {
-        $data = $request->validated();
+        $data = $this->withResolvedCategory($request->validated());
         $item = InventoryItem::create($this->itemAttributes($data));
 
         // Optional opening stock.
@@ -192,7 +203,7 @@ class InventoryController extends Controller
 
     public function update(StoreInventoryItemRequest $request, InventoryItem $inventory): RedirectResponse
     {
-        $inventory->update($this->itemAttributes($request->validated()));
+        $inventory->update($this->itemAttributes($this->withResolvedCategory($request->validated())));
 
         return redirect()->route('inventory.show', $inventory)->with('success', 'Item updated.');
     }
@@ -255,6 +266,24 @@ class InventoryController extends Controller
                 ->map(fn ($u) => ['value' => $u->id, 'label' => "{$u->name} ({$u->abbreviation})"]),
             'types' => collect(ItemType::cases())->map(fn ($t) => ['value' => $t->value, 'label' => $t->label()]),
         ];
+    }
+
+    /**
+     * If the form supplied a free-text "new_category", create (or reuse) that
+     * category and point the item at it. Lets staff add a category inline via
+     * the "Add new…" option without leaving the item form.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function withResolvedCategory(array $data): array
+    {
+        $name = trim((string) ($data['new_category'] ?? ''));
+        if ($name !== '') {
+            $data['inventory_category_id'] = InventoryCategory::firstOrCreate(['name' => $name])->id;
+        }
+
+        return $data;
     }
 
     /**

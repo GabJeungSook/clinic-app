@@ -15,7 +15,7 @@ const props = defineProps<{
     preset: string;
     range: { from: string; to: string; label: string };
     presets: Array<{ value: string; label: string }>;
-    totals: { count: number; subtotal: number; discount: number; tax: number; grand: number; collected: number; outstanding: number };
+    totals: { count: number; subtotal: number; discount: number; tax: number; grand: number; collected: number; outstanding: number; cost_services: number; net_sales: number; expenses: number; net_profit: number };
     byStatus: Array<{ label: string; count: number; total: number }>;
     byMethod: Array<{ label: string; value: number }>;
     itemsSold: Array<{ label: string; qty: number; total: number }>;
@@ -67,6 +67,21 @@ const applyCustom = () => router.get('/reports/sales', { preset: 'custom', from:
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Discounts</p><p class="text-lg font-semibold">-{{ money(totals.discount) }}</p></CardContent></Card>
             <Card><CardContent class="p-4"><p class="text-xs text-muted-foreground">Tax</p><p class="text-lg font-semibold">{{ money(totals.tax) }}</p></CardContent></Card>
         </div>
+
+        <!-- Profitability: gross → net sales → net profit -->
+        <Card>
+            <CardContent class="p-4">
+                <p class="mb-3 text-sm font-medium">Profitability</p>
+                <div class="report-kpis grid grid-cols-2 gap-4 lg:grid-cols-5">
+                    <div class="rounded-lg border p-3"><p class="text-xs text-muted-foreground">Gross sales</p><p class="text-lg font-semibold">{{ money(totals.grand) }}</p></div>
+                    <div class="rounded-lg border p-3"><p class="text-xs text-muted-foreground">Cost of services</p><p class="text-lg font-semibold text-rose-600 dark:text-rose-400">-{{ money(totals.cost_services) }}</p></div>
+                    <div class="rounded-lg border p-3"><p class="text-xs text-muted-foreground">Net sales</p><p class="text-lg font-semibold">{{ money(totals.net_sales) }}</p></div>
+                    <div class="rounded-lg border p-3"><p class="text-xs text-muted-foreground">Expenses</p><p class="text-lg font-semibold text-rose-600 dark:text-rose-400">-{{ money(totals.expenses) }}</p></div>
+                    <div class="rounded-lg border p-3"><p class="text-xs text-muted-foreground">Net profit</p><p class="text-lg font-semibold" :class="totals.net_profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'">{{ money(totals.net_profit) }}</p></div>
+                </div>
+                <p class="mt-2 text-xs text-muted-foreground">Net sales = gross sales − cost of services delivered. Net profit also subtracts cash expenses for the period.</p>
+            </CardContent>
+        </Card>
 
         <div class="grid gap-4 lg:grid-cols-2">
             <!-- Sales by status -->

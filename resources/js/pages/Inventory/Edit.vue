@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, useForm, Link } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ const form = useForm({
     barcode: (props.item.barcode as string) ?? '',
     type: props.item.type as string,
     inventory_category_id: (props.item.inventory_category_id as string) ?? '',
+    new_category: '',
     base_unit_id: props.item.base_unit_id as string,
     is_batch_tracked: !!props.item.is_batch_tracked,
     track_expiry: !!props.item.track_expiry,
@@ -29,6 +31,14 @@ const form = useForm({
     reorder_qty: props.item.reorder_qty as number,
     default_sell_price: props.item.default_sell_price as number,
     is_active: !!props.item.is_active,
+});
+
+const NEW_CATEGORY = '__new__';
+const categoryOptions = computed(() => [...props.categories, { value: NEW_CATEGORY, label: '+ Add new category…' }]);
+const categoryChoice = ref((props.item.inventory_category_id as string) ?? '');
+watch(categoryChoice, (v) => {
+    if (v === NEW_CATEGORY) form.inventory_category_id = '';
+    else { form.inventory_category_id = v; form.new_category = ''; }
 });
 
 const submit = () => form.put(`/inventory/${props.item.id}`);
@@ -52,7 +62,8 @@ const submit = () => form.put(`/inventory/${props.item.id}`);
                     </div>
                     <div class="grid gap-1.5">
                         <Label>Category</Label>
-                        <SearchSelect v-model="form.inventory_category_id" :options="categories" placeholder="—" empty-label="—" />
+                        <SearchSelect v-model="categoryChoice" :options="categoryOptions" placeholder="—" empty-label="—" />
+                        <Input v-if="categoryChoice === NEW_CATEGORY" v-model="form.new_category" placeholder="New category name" />
                     </div>
                     <div class="grid gap-1.5">
                         <Label>Base unit *</Label>

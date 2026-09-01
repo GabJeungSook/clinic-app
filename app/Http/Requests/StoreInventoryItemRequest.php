@@ -32,6 +32,7 @@ class StoreInventoryItemRequest extends FormRequest
             'barcode' => ['nullable', 'string', 'max:60'],
             'type' => ['required', new Enum(ItemType::class)],
             'inventory_category_id' => ['nullable', 'string', 'exists:inventory_categories,id'],
+            'new_category' => ['nullable', 'string', 'max:100'],
             'base_unit_id' => ['required', 'string', 'exists:units,id'],
             'is_batch_tracked' => ['boolean'],
             'track_expiry' => ['boolean'],

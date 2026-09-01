@@ -71,7 +71,7 @@ class ServiceController extends Controller
         return Inertia::render('Services/Edit', [
             'service' => $service->only([
                 'id', 'name', 'code', 'service_category_id', 'description',
-                'default_session_count', 'default_price', 'default_interval_days',
+                'default_session_count', 'default_price', 'cost', 'default_interval_days',
                 'duration_minutes', 'is_active',
             ]),
             'categories' => $this->categories(),

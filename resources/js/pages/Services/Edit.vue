@@ -27,6 +27,7 @@ const form = useForm({
     description: (props.service.description as string) ?? '',
     default_session_count: props.service.default_session_count as number,
     default_price: props.service.default_price as number,
+    cost: (props.service.cost as number) ?? 0,
     default_interval_days: props.service.default_interval_days as number | null,
     duration_minutes: props.service.duration_minutes as number | null,
     is_active: !!props.service.is_active,
@@ -74,6 +75,11 @@ const removeConsumable = (id: string) =>
                         </div>
                     </div>
                     <p v-if="sessions > 1" class="-mt-2 text-xs text-muted-foreground">Package total ({{ sessions }} sessions): <strong>{{ money(form.default_price) }}</strong></p>
+                    <div class="grid gap-1.5">
+                        <Label for="cost">Cost per session</Label>
+                        <Input id="cost" type="number" step="0.01" min="0" v-model="form.cost" />
+                        <p class="text-xs text-muted-foreground">What it costs you to deliver one session — used for gross vs net sales in reports.</p>
+                    </div>
                     <div class="grid gap-1.5">
                         <Label for="cat">Category</Label>
                         <SearchSelect id="cat" v-model="form.service_category_id" :options="categories" placeholder="—" empty-label="—" />

@@ -20,6 +20,7 @@ class Service extends Model
     {
         return [
             'default_price' => 'decimal:2',
+            'cost' => 'decimal:2',
             'is_active' => 'boolean',
         ];
     }

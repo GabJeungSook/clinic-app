@@ -27,6 +27,7 @@ class RoleSeeder extends Seeder
         'billing.view', 'billing.manage',
         'promotions.manage',
         'reports.view',
+        'expenses.view', 'expenses.manage',
         'settings.manage', 'users.manage',
     ];
 
@@ -48,6 +49,7 @@ class RoleSeeder extends Seeder
                 'services.view', 'inventory.view',
                 'treatments.view', 'treatments.manage',
                 'billing.view', 'reports.view',
+                'expenses.view', 'expenses.manage',
             ],
 
             // Receptionist — front desk: dashboard, appointments, patients, POS, reports.
@@ -56,6 +58,7 @@ class RoleSeeder extends Seeder
                 'appointments.view', 'appointments.manage',
                 'pos.use',
                 'reports.view',
+                'expenses.view', 'expenses.manage',
             ],
 
             // Inventory clerk — stock and purchasing.

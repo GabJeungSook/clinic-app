@@ -19,6 +19,7 @@ interface ItemRow {
     type_label: string;
     unit: string | null;
     category: string | null;
+    supplier: string | null;
     on_hand: number;
     reorder_level: number;
     is_low: boolean;
@@ -136,6 +137,7 @@ function applyFilters() {
                                 <th class="px-4 py-2 font-medium">Item</th>
                                 <th class="px-4 py-2 font-medium">Type</th>
                                 <th class="px-4 py-2 font-medium">Category</th>
+                                <th class="px-4 py-2 font-medium">Supplier</th>
                                 <th class="px-4 py-2 text-right font-medium">On hand</th>
                                 <th class="px-4 py-2 text-right font-medium">Reorder</th>
                                 <th class="px-4 py-2 font-medium">Status</th>
@@ -154,6 +156,7 @@ function applyFilters() {
                                 </td>
                                 <td class="px-4 py-2">{{ i.type_label }}</td>
                                 <td class="px-4 py-2">{{ i.category ?? '—' }}</td>
+                                <td class="px-4 py-2">{{ i.supplier ?? '—' }}</td>
                                 <td class="px-4 py-2 text-right font-medium">
                                     {{ Number(i.on_hand) }} <span class="text-xs text-muted-foreground">{{ i.unit }}</span>
                                 </td>
@@ -172,7 +175,7 @@ function applyFilters() {
                                 </td>
                             </tr>
                             <tr v-if="items.data.length === 0">
-                                <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">No items found.</td>
+                                <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">No items found.</td>
                             </tr>
                         </tbody>
                     </table>

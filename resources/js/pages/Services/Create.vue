@@ -27,6 +27,7 @@ const form = useForm({
     description: '',
     default_session_count: 1,
     default_price: 0,
+    cost: 0,
     default_interval_days: null as number | null,
     duration_minutes: null as number | null,
     is_active: true,
@@ -87,6 +88,14 @@ const submit = () =>
                             <Input id="price" type="number" step="0.01" min="0" v-model="perSession" />
                             <p v-if="sessions > 1" class="text-xs text-muted-foreground">Package total ({{ sessions }} sessions): <strong>{{ money(form.default_price) }}</strong></p>
                             <InputError :message="form.errors.default_price" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="grid gap-1.5">
+                            <Label for="cost">Cost per session</Label>
+                            <Input id="cost" type="number" step="0.01" min="0" v-model="form.cost" />
+                            <p class="text-xs text-muted-foreground">What it costs you to deliver one session — used for gross vs net sales in reports.</p>
+                            <InputError :message="form.errors.cost" />
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4">

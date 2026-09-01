@@ -62,12 +62,13 @@ class Checkout
         array $lineGroups,
         array $payments = [],
         ?string $invoicePromotionId = null,
+        float $invoiceDiscount = 0,
         ?int $performedBy = null,
         ?string $notes = null,
         bool $generateReceipt = false,
     ): array {
         return DB::transaction(function () use (
-            $patient, $lineGroups, $payments, $invoicePromotionId, $performedBy, $notes, $generateReceipt
+            $patient, $lineGroups, $payments, $invoicePromotionId, $invoiceDiscount, $performedBy, $notes, $generateReceipt
         ) {
             $sessions = [];
             $invoiceLines = [];
@@ -149,6 +150,24 @@ class Checkout
                 $retailToConsume[] = [$item, $qty];
             }
 
+            // 2b. Freebies — given free (₱0) but still deducted from stock so the
+            //     inventory stays accurate.
+            foreach ($lineGroups['freebies'] ?? [] as $line) {
+                $item = InventoryItem::findOrFail($line['inventory_item_id']);
+                $qty = round((float) $line['quantity'], 3);
+
+                $invoiceLines[] = [
+                    'description' => $item->name . ' (Freebie)',
+                    'quantity' => $qty,
+                    'unit_price' => 0,
+                    'discount' => 0,
+                    'promotion_id' => null,
+                    'itemable' => $item,
+                ];
+
+                $retailToConsume[] = [$item, $qty];
+            }
+
             // 3. Manual free-text lines.
             foreach ($lineGroups['manual'] ?? [] as $line) {
                 $invoiceLines[] = [
@@ -171,6 +190,7 @@ class Checkout
                 $patient,
                 $invoiceLines,
                 invoicePromotionId: $invoicePromotionId,
+                manualInvoiceDiscount: $invoiceDiscount,
                 status: InvoiceStatus::Unpaid,
                 createdBy: $performedBy,
                 notes: $notes,

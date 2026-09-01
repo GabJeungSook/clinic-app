@@ -53,6 +53,11 @@ class InventoryItem extends Model implements Auditable
         return $this->hasMany(StockMovement::class);
     }
 
+    public function purchaseItems(): HasMany
+    {
+        return $this->hasMany(PurchaseItem::class);
+    }
+
     /** Live on-hand quantity from the ledger (authoritative). */
     public function stockOnHand(): float
     {

@@ -159,6 +159,7 @@ class CheckoutController extends Controller
         $data = $request->validate([
             'patient_id' => ['nullable', 'string', 'exists:patients,id'],
             'invoice_promotion_id' => ['nullable', 'string', 'exists:promotions,id'],
+            'invoice_discount' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
 
             'line_groups.services' => ['array'],
@@ -181,6 +182,10 @@ class CheckoutController extends Controller
             'line_groups.retail.*.discount' => ['nullable', 'numeric', 'min:0'],
             'line_groups.retail.*.promotion_id' => ['nullable', 'string', 'exists:promotions,id'],
 
+            'line_groups.freebies' => ['array'],
+            'line_groups.freebies.*.inventory_item_id' => ['required', 'string', 'exists:inventory_items,id'],
+            'line_groups.freebies.*.quantity' => ['required', 'numeric', 'min:0.001'],
+
             'line_groups.manual' => ['array'],
             'line_groups.manual.*.description' => ['required', 'string', 'max:255'],
             'line_groups.manual.*.quantity' => ['required', 'numeric', 'min:0.001'],
@@ -199,9 +204,10 @@ class CheckoutController extends Controller
         $groups = $data['line_groups'] ?? [];
         $services = $groups['services'] ?? [];
         $retail = $groups['retail'] ?? [];
+        $freebies = $groups['freebies'] ?? [];
         $manual = $groups['manual'] ?? [];
 
-        if (empty($services) && empty($retail) && empty($manual)) {
+        if (empty($services) && empty($retail) && empty($freebies) && empty($manual)) {
             throw ValidationException::withMessages(['line_groups' => 'Add at least one item to the sale.']);
         }
         $patientId = $data['patient_id'] ?? null;
@@ -221,8 +227,8 @@ class CheckoutController extends Controller
             return $line;
         }, $services);
 
-        // Guard: a retail sale can never take more than is on hand.
-        foreach ($retail as $line) {
+        // Guard: a retail sale or freebie can never take more than is on hand.
+        foreach (array_merge($retail, $freebies) as $line) {
             $item = InventoryItem::find($line['inventory_item_id']);
             if ($item && (float) $line['quantity'] > $item->stockOnHand()) {
                 throw ValidationException::withMessages([
@@ -234,9 +240,10 @@ class CheckoutController extends Controller
         try {
             $result = $checkout->handle(
                 $patientId ? Patient::find($patientId) : null,
-                ['services' => $services, 'retail' => $retail, 'manual' => $manual],
+                ['services' => $services, 'retail' => $retail, 'freebies' => $freebies, 'manual' => $manual],
                 payments: $data['payments'] ?? [],
                 invoicePromotionId: $data['invoice_promotion_id'] ?? null,
+                invoiceDiscount: (float) ($data['invoice_discount'] ?? 0),
                 performedBy: $request->user()?->id,
                 notes: $data['notes'] ?? null,
                 generateReceipt: (bool) ($data['generate_receipt'] ?? false),

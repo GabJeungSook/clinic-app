@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Printer, Download } from '@lucide/vue';
@@ -21,44 +21,60 @@ const { activeSection, printSection } = usePrint();
 
 const cardEl = ref<{ $el: HTMLElement } | null>(null);
 const downloading = ref(false);
+// True only while THIS section is being captured to PDF, so its standalone
+// letterhead is rendered into the DOM for the export (print-only → shown in the
+// PDF clone). Local so it never affects the other sections on screen.
+const exporting = ref(false);
+
 const downloadPdf = async () => {
     downloading.value = true;
+    exporting.value = true;
+    await nextTick();
     try {
         await downloadElementPdf(cardEl.value?.$el, [props.meta.clinic, props.title, pdfDateStamp()]);
     } finally {
+        exporting.value = false;
         downloading.value = false;
     }
 };
 
 // Hidden from the printout when a *different* section is being printed alone.
 const hidden = computed(() => activeSection.value !== null && activeSection.value !== props.sectionKey);
-// This section is the sole print target → show its standalone report header.
-const soleTarget = computed(() => activeSection.value === props.sectionKey);
+// This section is the sole print target OR is being exported to PDF → show its
+// standalone report header (same letterhead + title band as the whole report).
+const standalone = computed(() => activeSection.value === props.sectionKey || exporting.value);
 </script>
 
 <template>
     <Card ref="cardEl" :class="{ 'print-hidden': hidden }">
-        <!-- Standalone letterhead (only when this list is printed/exported by itself) -->
-        <table v-if="soleTarget" class="print-only report-letterhead report-letterhead--section">
-            <tbody>
-                <tr>
-                    <td class="report-letterhead__brand">
-                        <span class="report-letterhead__name">{{ meta.clinic || 'Clinic' }}</span>
-                        <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
-                    </td>
-                    <td class="report-letterhead__meta">
-                        <span class="report-letterhead__doctype">{{ title }}</span>
-                        <span v-if="subtitle" class="report-letterhead__period">{{ subtitle }}</span>
-                        <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <!-- Standalone letterhead + title band — same format as the whole report,
+             shown only when this section is printed/exported by itself. -->
+        <template v-if="standalone">
+            <table class="print-only report-letterhead">
+                <tbody>
+                    <tr>
+                        <td class="report-letterhead__brand">
+                            <span class="report-letterhead__name">{{ meta.clinic || 'Clinic' }}</span>
+                            <span v-if="contactLine" class="report-letterhead__contact">{{ contactLine }}</span>
+                        </td>
+                        <td class="report-letterhead__meta">
+                            <span class="report-letterhead__generated">Generated {{ meta.generated_at }}</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="print-only report-title">
+                <span class="report-title__name">{{ title }}</span>
+                <span v-if="subtitle" class="report-title__period">{{ subtitle }}</span>
+            </div>
+        </template>
 
         <CardHeader class="flex flex-row items-center justify-between gap-3">
             <div>
-                <CardTitle class="text-base">{{ title }}</CardTitle>
-                <p v-if="subtitle" class="text-xs text-muted-foreground no-print">{{ subtitle }}</p>
+                <!-- The card's own title doubles as the report title band when
+                     printed alone, so hide it in that case to avoid repetition. -->
+                <CardTitle v-if="!standalone" class="text-base">{{ title }}</CardTitle>
+                <p v-if="subtitle && !standalone" class="text-xs text-muted-foreground no-print">{{ subtitle }}</p>
             </div>
             <div class="flex items-center gap-2 no-print">
                 <Button variant="outline" size="sm" :disabled="downloading" @click="downloadPdf">
@@ -75,7 +91,7 @@ const soleTarget = computed(() => activeSection.value === props.sectionKey);
         </CardContent>
 
         <!-- Sign-off block when this section is printed/exported on its own -->
-        <table v-if="soleTarget" class="print-only report-signoff">
+        <table v-if="standalone" class="print-only report-signoff">
             <tbody>
                 <tr>
                     <td>
