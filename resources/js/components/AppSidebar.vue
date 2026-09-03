@@ -2,6 +2,7 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import {
+    ArrowUpCircle,
     CalendarDays,
     ChartColumn,
     CreditCard,
@@ -70,6 +71,13 @@ const permissions = computed<string[]>(
     () => ((usePage().props.auth as { permissions?: string[] })?.permissions) ?? [],
 );
 
+// "Update available" badge — shown once the launch check (or a manual check)
+// finds a newer release, and while one is downloaded and waiting to install.
+const updateReady = computed(() => {
+    const state = (usePage().props.update as { status?: { state?: string } })?.status?.state;
+    return state === 'available' || state === 'downloaded';
+});
+
 const visibleGroups = computed(() =>
     navGroups
         .map((group) => ({
@@ -99,6 +107,16 @@ const visibleGroups = computed(() =>
         </SidebarContent>
 
         <SidebarFooter>
+            <SidebarMenu v-if="updateReady">
+                <SidebarMenuItem>
+                    <SidebarMenuButton as-child tooltip="Update available" class="text-primary">
+                        <Link href="/clinic-settings">
+                            <ArrowUpCircle />
+                            <span>Update available</span>
+                        </Link>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
             <NavUser />
         </SidebarFooter>
     </Sidebar>

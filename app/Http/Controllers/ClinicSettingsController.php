@@ -5,10 +5,13 @@ namespace App\Http\Controllers;
 use App\Actions\System\BackupDatabase;
 use App\Actions\System\RestoreDatabase;
 use App\Support\Settings\Settings;
+use App\Support\Updater\UpdaterState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\File;
+use Native\Desktop\Facades\AutoUpdater;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -33,7 +36,84 @@ class ClinicSettingsController extends Controller
             'settings' => Settings::all(),
             'backups' => $backups,
             'lastBackup' => Settings::get('backup.last_succeeded_at'),
+            'updater' => [
+                'enabled' => (bool) config('nativephp.updater.enabled'),
+                'currentVersion' => config('nativephp.version'),
+                'status' => UpdaterState::get(),
+            ],
         ]);
+    }
+
+    /**
+     * Ask the desktop auto-updater to check the GitHub release feed for a newer
+     * version. Progress arrives asynchronously as NativePHP events (recorded by
+     * UpdaterEventSubscriber); the UI polls updateStatus() for the outcome.
+     */
+    public function checkForUpdates(): RedirectResponse
+    {
+        if (! $this->updaterAvailable()) {
+            UpdaterState::set([
+                'state' => 'error',
+                'message' => 'Updates are only available in the installed app.',
+            ]);
+
+            return back();
+        }
+
+        UpdaterState::set(['state' => 'checking', 'message' => null]);
+
+        try {
+            AutoUpdater::checkForUpdates();
+        } catch (\Throwable $e) {
+            report($e);
+            UpdaterState::set(['state' => 'error', 'message' => 'Could not reach the update server.']);
+        }
+
+        return back();
+    }
+
+    /** Download the update the last check found (does not install it). */
+    public function downloadUpdate(): RedirectResponse
+    {
+        if ($this->updaterAvailable()) {
+            try {
+                UpdaterState::set(['state' => 'downloading', 'percent' => 0]);
+                AutoUpdater::downloadUpdate();
+            } catch (\Throwable $e) {
+                report($e);
+                UpdaterState::set(['state' => 'error', 'message' => 'Could not start the download.']);
+            }
+        }
+
+        return back();
+    }
+
+    /** Quit and install the downloaded update — closes and relaunches the app. */
+    public function installUpdate(): RedirectResponse
+    {
+        if ($this->updaterAvailable()) {
+            try {
+                AutoUpdater::quitAndInstall();
+            } catch (\Throwable $e) {
+                report($e);
+                UpdaterState::set(['state' => 'error', 'message' => 'Could not install the update.']);
+            }
+        }
+
+        return back();
+    }
+
+    /** Lightweight polling endpoint for the settings UI. */
+    public function updateStatus(): JsonResponse
+    {
+        return response()->json(UpdaterState::get());
+    }
+
+    /** True only inside the packaged desktop app with the updater enabled. */
+    private function updaterAvailable(): bool
+    {
+        return (bool) config('nativephp-internal.running')
+            && (bool) config('nativephp.updater.enabled');
     }
 
     public function update(Request $request): RedirectResponse

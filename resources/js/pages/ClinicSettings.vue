@@ -1,20 +1,69 @@
 <script setup lang="ts">
 import { Head, useForm, router } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import { DatabaseBackup, Download, RotateCcw, Upload } from '@lucide/vue';
+import { ArrowUpCircle, DatabaseBackup, Download, RefreshCw, RotateCcw, RotateCw, Upload } from '@lucide/vue';
 
 defineOptions({ layout: { breadcrumbs: [{ title: 'Settings', href: '/clinic-settings' }] } });
+
+type UpdateStatus = {
+    state: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error';
+    version: string | null;
+    percent: number;
+    notes: string | null;
+    message: string | null;
+    checked_at: string | null;
+};
 
 const props = defineProps<{
     settings: Record<string, string | number | boolean | null>;
     backups: Array<{ name: string; size_kb: number }>;
     lastBackup: string | null;
+    updater: { enabled: boolean; currentVersion: string; status: UpdateStatus };
 }>();
+
+// --- Software update -------------------------------------------------------
+// The check/download run in the Electron shell and report progress back as
+// events; we poll a tiny status endpoint while something is in flight.
+const status = ref<UpdateStatus>(props.updater.status);
+let poll: ReturnType<typeof setInterval> | null = null;
+
+const busy = computed(() => ['checking', 'downloading'].includes(status.value.state));
+const checking = computed(() => status.value.state === 'checking');
+
+const stopPolling = () => {
+    if (poll) { clearInterval(poll); poll = null; }
+};
+const pollStatus = async () => {
+    try {
+        const res = await fetch('/clinic-settings/update/status', { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+            status.value = await res.json();
+            if (!['checking', 'downloading'].includes(status.value.state)) stopPolling();
+        }
+    } catch {
+        /* offline mid-poll — keep the last known state */
+    }
+};
+const startPolling = () => { stopPolling(); poll = setInterval(pollStatus, 1500); };
+
+const checkForUpdates = () => {
+    status.value = { ...status.value, state: 'checking', message: null };
+    router.post('/clinic-settings/update/check', {}, { preserveScroll: true, preserveState: true, onSuccess: startPolling });
+};
+const downloadUpdate = () => {
+    status.value = { ...status.value, state: 'downloading', percent: 0 };
+    router.post('/clinic-settings/update/download', {}, { preserveScroll: true, preserveState: true, onSuccess: startPolling });
+};
+const installUpdate = () => {
+    router.post('/clinic-settings/update/install', {}, { preserveScroll: true, preserveState: true });
+};
+
+onUnmounted(stopPolling);
 
 const form = useForm({
     clinic_name: (props.settings['clinic.name'] as string) ?? '',
@@ -46,6 +95,55 @@ const onImport = (e: Event) => {
 <template>
     <Head title="Settings" />
     <div class=" grid w-full gap-6 p-4 md:grid-cols-2 md:p-6">
+        <Card class="md:col-span-2">
+            <CardHeader><CardTitle class="flex items-center gap-2"><ArrowUpCircle class="size-4" /> Software update</CardTitle></CardHeader>
+            <CardContent class="space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <p class="text-sm text-muted-foreground">
+                        Current version: <strong>{{ updater.currentVersion }}</strong>
+                    </p>
+                    <Button variant="secondary" :disabled="busy" @click="checkForUpdates">
+                        <RefreshCw class="size-4" :class="{ 'animate-spin': checking }" />
+                        {{ checking ? 'Checking…' : 'Check for updates' }}
+                    </Button>
+                </div>
+
+                <p v-if="status.state === 'not-available'" class="text-sm font-medium text-emerald-600">
+                    You're on the latest version.
+                </p>
+
+                <div v-else-if="status.state === 'available'" class="space-y-3 rounded-lg border p-3">
+                    <p class="text-sm font-medium">Version {{ status.version }} is available.</p>
+                    <p v-if="status.notes" class="max-h-40 overflow-auto whitespace-pre-line text-xs text-muted-foreground">{{ status.notes }}</p>
+                    <Button @click="downloadUpdate"><Download class="size-4" /> Download &amp; install</Button>
+                </div>
+
+                <div v-else-if="status.state === 'downloading'" class="space-y-2">
+                    <p class="text-sm">Downloading version {{ status.version }}… {{ status.percent }}%</p>
+                    <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div class="h-full rounded-full bg-primary transition-all" :style="{ width: status.percent + '%' }"></div>
+                    </div>
+                </div>
+
+                <div v-else-if="status.state === 'downloaded'" class="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                    <p class="text-sm font-medium">Version {{ status.version }} is ready to install.</p>
+                    <p class="text-xs text-muted-foreground">The app will close and reopen to finish updating.</p>
+                    <ConfirmDialog
+                        title="Restart to update now?"
+                        description="The app will close and reopen on the new version. Make sure no one is in the middle of a transaction."
+                        confirm-text="Restart &amp; update"
+                        @confirm="installUpdate"
+                    >
+                        <Button><RotateCw class="size-4" /> Restart to update</Button>
+                    </ConfirmDialog>
+                </div>
+
+                <p v-else-if="status.state === 'error'" class="text-sm text-amber-600">
+                    {{ status.message || 'Something went wrong checking for updates.' }}
+                </p>
+            </CardContent>
+        </Card>
+
         <Card>
             <CardHeader><CardTitle>Clinic &amp; billing</CardTitle></CardHeader>
             <CardContent>

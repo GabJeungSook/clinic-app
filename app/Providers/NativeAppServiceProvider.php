@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Native\Desktop\Contracts\ProvidesPhpIni;
+use Native\Desktop\Facades\AutoUpdater;
 use Native\Desktop\Facades\Window;
 
 class NativeAppServiceProvider implements ProvidesPhpIni
@@ -32,6 +33,19 @@ class NativeAppServiceProvider implements ProvidesPhpIni
                 ->rememberState()     // restore size/position between launches
                 ->width(1280)
                 ->height(800);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // Silently check for a newer release on launch. With autoDownload off
+        // (electron patch) this only *notifies* — the sidebar badge lights up and
+        // nothing downloads until the user clicks. A lightweight HTTP post to the
+        // Electron API, not DB/console work, so it's safe here. Never let a failed
+        // check (e.g. offline) block the window from opening.
+        try {
+            if (config('nativephp.updater.enabled')) {
+                AutoUpdater::checkForUpdates();
+            }
         } catch (\Throwable $e) {
             report($e);
         }

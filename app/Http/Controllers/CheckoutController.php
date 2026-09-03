@@ -6,10 +6,12 @@ use App\Actions\Billing\Checkout;
 use App\Actions\Patients\CreatePatient;
 use App\Enums\AppointmentStatus;
 use App\Enums\CourseStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentMethod;
 use App\Exceptions\InsufficientStockException;
 use App\Models\Appointment;
 use App\Models\InventoryItem;
+use App\Models\Invoice;
 use App\Models\Patient;
 use App\Models\Promotion;
 use App\Models\Service;
@@ -57,7 +59,37 @@ class CheckoutController extends Controller
                 ])->values(),
             ]);
 
+        // Outstanding balances per patient, so the front desk can settle them right
+        // at checkout (no separate Billing trip). Package invoices expose a
+        // per-session price to pre-fill a sensible installment amount.
+        $coursesByInvoice = TreatmentCourse::query()
+            ->whereNotNull('invoice_id')
+            ->get(['id', 'invoice_id'])
+            ->keyBy('invoice_id');
+
+        $outstanding = Invoice::query()
+            ->whereIn('status', [InvoiceStatus::Unpaid, InvoiceStatus::PartiallyPaid])
+            ->whereNotNull('patient_id')
+            ->with('items:id,invoice_id,description_snapshot,unit_price,itemable_id')
+            ->latest('issued_at')
+            ->get()
+            ->groupBy('patient_id')
+            ->map(fn ($invoices) => $invoices->map(function (Invoice $i) use ($coursesByInvoice) {
+                $course = $coursesByInvoice->get($i->id);
+                $courseItem = $course ? $i->items->firstWhere('itemable_id', $course->id) : null;
+
+                return [
+                    'invoice_id' => $i->id,
+                    'invoice_no' => $i->invoice_no,
+                    'label' => $i->items->first()?->description_snapshot ?? "Invoice {$i->invoice_no}",
+                    'balance' => $i->amountDue(),
+                    'per_session' => $courseItem ? round((float) $courseItem->unit_price, 2) : null,
+                    'course_id' => $course?->id,
+                ];
+            })->values());
+
         return Inertia::render('Checkout/Create', [
+            'outstanding' => $outstanding,
             'patients' => Patient::query()->orderBy('last_name')->get(['id', 'first_name', 'last_name', 'code'])
                 ->map(fn ($p) => ['value' => $p->id, 'label' => "{$p->full_name} ({$p->code})"]),
             'services' => $services,
@@ -87,13 +119,18 @@ class CheckoutController extends Controller
             'units' => Unit::query()->orderBy('name')->get(['id', 'abbreviation', 'name'])
                 ->map(fn ($u) => ['value' => $u->id, 'label' => $u->abbreviation]),
             'courses' => TreatmentCourse::query()->where('status', CourseStatus::Active)
-                ->get(['id', 'patient_id', 'service_id', 'name_snapshot', 'total_sessions'])
+                ->with('invoice')
+                ->get()
                 ->map(fn (TreatmentCourse $c) => [
                     'value' => $c->id,
                     'patient_id' => $c->patient_id,
                     'service_id' => $c->service_id,
                     'label' => $c->name_snapshot,
+                    'total' => $c->total_sessions,
+                    'completed' => $c->sessions_completed,
                     'remaining' => $c->sessions_remaining,
+                    // The whole package is one invoice — "paid" means it's settled.
+                    'paid' => $c->invoice ? $c->invoice->amountDue() <= 0 : false,
                 ])
                 ->filter(fn ($c) => $c['remaining'] > 0)
                 ->values(),
@@ -198,6 +235,13 @@ class CheckoutController extends Controller
             'payments.*.amount' => ['required_with:payments', 'numeric', 'min:0.01'],
             'payments.*.reference' => ['nullable', 'string', 'max:150'],
 
+            // Balances being settled now against the patient's existing invoices.
+            'settlements' => ['array'],
+            'settlements.*.invoice_id' => ['required', 'string', 'exists:invoices,id'],
+            'settlements.*.amount' => ['required', 'numeric', 'min:0.01'],
+            'settlements.*.discount' => ['nullable', 'numeric', 'min:0'],
+            'settlements.*.method' => ['required', 'string', Rule::enum(PaymentMethod::class)],
+
             'generate_receipt' => ['boolean'],
         ]);
 
@@ -207,7 +251,7 @@ class CheckoutController extends Controller
         $freebies = $groups['freebies'] ?? [];
         $manual = $groups['manual'] ?? [];
 
-        if (empty($services) && empty($retail) && empty($freebies) && empty($manual)) {
+        if (empty($services) && empty($retail) && empty($freebies) && empty($manual) && empty($data['settlements'] ?? [])) {
             throw ValidationException::withMessages(['line_groups' => 'Add at least one item to the sale.']);
         }
         $patientId = $data['patient_id'] ?? null;
@@ -237,6 +281,28 @@ class CheckoutController extends Controller
             }
         }
 
+        // Validate settlements: each must belong to the selected patient and never
+        // collect (payment + discount) more than the balance actually owed.
+        $settlements = $data['settlements'] ?? [];
+        if (! empty($settlements)) {
+            if (empty($patientId)) {
+                throw ValidationException::withMessages(['settlements' => 'Select a patient to settle a balance.']);
+            }
+            $invoices = Invoice::query()
+                ->whereIn('id', array_column($settlements, 'invoice_id'))
+                ->get()->keyBy('id');
+            foreach ($settlements as $s) {
+                $inv = $invoices->get($s['invoice_id']);
+                if (! $inv || $inv->patient_id !== $patientId) {
+                    throw ValidationException::withMessages(['settlements' => 'A balance does not belong to this patient.']);
+                }
+                $collect = round((float) $s['amount'] + (float) ($s['discount'] ?? 0), 2);
+                if ($collect > round((float) $inv->amountDue(), 2) + 0.01) {
+                    throw ValidationException::withMessages(['settlements' => "Amount exceeds the balance on {$inv->invoice_no}."]);
+                }
+            }
+        }
+
         try {
             $result = $checkout->handle(
                 $patientId ? Patient::find($patientId) : null,
@@ -247,6 +313,7 @@ class CheckoutController extends Controller
                 performedBy: $request->user()?->id,
                 notes: $data['notes'] ?? null,
                 generateReceipt: (bool) ($data['generate_receipt'] ?? false),
+                settlements: $settlements,
             );
         } catch (InsufficientStockException $e) {
             throw ValidationException::withMessages(['line_groups' => $e->getMessage()]);

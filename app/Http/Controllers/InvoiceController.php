@@ -6,6 +6,7 @@ use App\Actions\Billing\GenerateReceipt;
 use App\Actions\Billing\RecordPayment;
 use App\Actions\Billing\RefundInvoice;
 use App\Actions\Billing\VoidInvoice;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentMethod;
 use App\Models\Invoice;
 use App\Support\Settings\Settings;
@@ -20,13 +21,23 @@ class InvoiceController extends Controller
     public function index(Request $request): Response
     {
         $search = trim((string) $request->query('search', ''));
+        // "unpaid" means still-owing (Unpaid + Partially Paid) — the same set the
+        // dashboard's outstanding banner links here to show.
+        $status = $request->query('status') === 'unpaid' ? 'unpaid' : 'all';
 
-        $invoices = Invoice::query()
-            ->with('patient:id,first_name,last_name')
+        $openStatuses = [InvoiceStatus::Unpaid, InvoiceStatus::PartiallyPaid];
+
+        // Shared filter (search + status) so the page list and the summary totals
+        // always describe the exact same set of invoices.
+        $filtered = fn () => Invoice::query()
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q
                 ->where('invoice_no', 'like', "%{$search}%")
                 ->orWhereHas('patient', fn ($p) => $p->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%"))))
+            ->when($status === 'unpaid', fn ($q) => $q->whereIn('status', $openStatuses));
+
+        $invoices = $filtered()
+            ->with('patient:id,first_name,last_name')
             ->latest('issued_at')
             ->paginate(15)
             ->withQueryString()
@@ -40,9 +51,18 @@ class InvoiceController extends Controller
                 'issued_at' => $i->issued_at?->toDateString(),
             ]);
 
+        // Totals across the WHOLE filtered set (not just the current page).
+        $summary = [
+            'count' => $filtered()->count(),
+            'outstanding' => (float) $filtered()
+                ->get(['id', 'grand_total', 'amount_paid', 'status'])
+                ->sum(fn (Invoice $i) => $i->amountDue()),
+        ];
+
         return Inertia::render('Billing/Index', [
             'invoices' => $invoices,
-            'filters' => ['search' => $search],
+            'filters' => ['search' => $search, 'status' => $status],
+            'summary' => $summary,
             'currency' => Settings::get('billing.currency_symbol', '₱'),
         ]);
     }

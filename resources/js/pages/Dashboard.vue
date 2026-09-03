@@ -199,7 +199,7 @@ const kpis = computed(() => [
                     <strong>{{ money(stats.outstanding_amount) }}</strong> outstanding across
                     {{ stats.open_invoices }} unpaid invoice(s).
                 </span>
-                <Link href="/invoices" class="ml-auto flex items-center gap-1 text-sm font-medium text-amber-700 hover:underline dark:text-amber-400">
+                <Link href="/invoices?status=unpaid" class="ml-auto flex items-center gap-1 text-sm font-medium text-amber-700 hover:underline dark:text-amber-400">
                     View <ArrowRight class="size-3.5" />
                 </Link>
             </CardContent>

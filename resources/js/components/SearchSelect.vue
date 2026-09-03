@@ -69,12 +69,16 @@ function updatePosition() {
 
 function openMenu() {
     if (props.disabled) return;
-    open.value = true;
     query.value = '';
     highlighted.value = 0;
+    // Position from the trigger's rect *before* the panel renders, so the
+    // teleported panel never paints (unpositioned) at the bottom of <body>.
+    updatePosition();
+    open.value = true;
     nextTick(() => {
         updatePosition();
-        searchEl.value?.focus();
+        // preventScroll as a belt-and-braces guard against focus scrolling the page.
+        searchEl.value?.focus({ preventScroll: true });
     });
 }
 function toggle() {

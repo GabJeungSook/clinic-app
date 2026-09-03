@@ -6,13 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import Pagination from '@/components/Pagination.vue';
-import { CreditCard, Search } from '@lucide/vue';
+import { CheckCircle2, CreditCard, Search } from '@lucide/vue';
 
 defineOptions({ layout: { breadcrumbs: [{ title: 'Treatments', href: '/treatments' }] } });
 
 const props = defineProps<{
     courses: {
-        data: Array<{ id: string; patient: string | null; service: string | null; status: string; total_sessions: number; sessions_completed: number; sessions_remaining: number }>;
+        data: Array<{ id: string; patient: string | null; patient_id: string | null; service: string | null; status: string; total_sessions: number; sessions_completed: number; sessions_remaining: number }>;
         links: Array<{ url: string | null; label: string; active: boolean }>;
         total: number;
     };
@@ -23,6 +23,12 @@ const search = ref(props.filters.search ?? '');
 const setStatus = (s: string) => router.get('/treatments', { status: s, search: search.value }, { preserveState: true, replace: true });
 const submitSearch = () => router.get('/treatments', { status: props.filters.status, search: search.value }, { preserveState: true, replace: true });
 const tone: Record<string, string> = { active: 'bg-sky-100 text-sky-700', completed: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-rose-100 text-rose-700', expired: 'bg-amber-100 text-amber-700' };
+
+// A package is done when marked completed or all sessions are used up.
+const isDone = (c: { status: string; sessions_completed: number; total_sessions: number }) =>
+    c.status === 'completed' || c.sessions_completed >= c.total_sessions;
+// Rows are ordered by patient — only show the name on the first row of each group.
+const isNewPatient = (i: number) => i === 0 || props.courses.data[i - 1].patient_id !== props.courses.data[i].patient_id;
 </script>
 
 <template>
@@ -54,15 +60,16 @@ const tone: Record<string, string> = { active: 'bg-sky-100 text-sky-700', comple
                             <tr><th class="px-4 py-2 font-medium">Patient</th><th class="px-4 py-2 font-medium">Service</th><th class="px-4 py-2 font-medium">Progress</th><th class="px-4 py-2 font-medium">Status</th></tr>
                         </thead>
                         <tbody>
-                            <tr v-for="c in courses.data" :key="c.id" class="cursor-pointer border-b last:border-0 hover:bg-muted/40" @click="router.visit(`/treatments/${c.id}`)">
-                                <td class="px-4 py-2 font-medium">{{ c.patient }}</td>
+                            <tr v-for="(c, i) in courses.data" :key="c.id" class="cursor-pointer hover:bg-muted/40" :class="isNewPatient(i) && i !== 0 ? 'border-t' : ''" @click="router.visit(`/treatments/${c.id}`)">
+                                <td class="px-4 py-2 font-medium">{{ isNewPatient(i) ? c.patient : '' }}</td>
                                 <td class="px-4 py-2">{{ c.service }}</td>
                                 <td class="px-4 py-2">
                                     <div class="flex items-center gap-2">
                                         <div class="h-2 w-28 overflow-hidden rounded-full bg-muted">
-                                            <div class="h-full bg-primary" :style="{ width: `${(c.sessions_completed / c.total_sessions) * 100}%` }" />
+                                            <div class="h-full" :class="isDone(c) ? 'bg-emerald-500' : 'bg-primary'" :style="{ width: `${Math.min(100, (c.sessions_completed / c.total_sessions) * 100)}%` }" />
                                         </div>
-                                        <span class="text-xs text-muted-foreground">{{ c.sessions_completed }}/{{ c.total_sessions }}</span>
+                                        <span class="text-xs" :class="isDone(c) ? 'font-medium text-emerald-600' : 'text-muted-foreground'">{{ c.sessions_completed }}/{{ c.total_sessions }}</span>
+                                        <span v-if="isDone(c)" class="inline-flex items-center gap-1 text-xs font-medium text-emerald-600"><CheckCircle2 class="size-3.5" /> Completed</span>
                                     </div>
                                 </td>
                                 <td class="px-4 py-2"><Badge :class="tone[c.status]">{{ c.status }}</Badge></td>

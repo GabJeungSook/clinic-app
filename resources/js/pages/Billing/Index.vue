@@ -17,12 +17,25 @@ const props = defineProps<{
         links: Array<{ url: string | null; label: string; active: boolean }>;
         total: number;
     };
-    filters: { search: string };
+    filters: { search: string; status: string };
+    summary: { count: number; outstanding: number };
     currency: string;
 }>();
 
 const search = ref(props.filters.search ?? '');
-const submitSearch = () => router.get('/invoices', { search: search.value }, { preserveState: true, replace: true });
+const status = ref(props.filters.status ?? 'all');
+
+const applyFilters = (next: Partial<{ search: string; status: string }> = {}) => {
+    const q: Record<string, string> = {
+        search: next.search ?? search.value,
+        status: next.status ?? status.value,
+    };
+    if (!q.search) delete q.search;
+    if (q.status === 'all') delete q.status; // keep the URL clean for the default
+    router.get('/invoices', q, { preserveState: true, replace: true });
+};
+const submitSearch = () => applyFilters();
+const setStatus = (s: string) => { status.value = s; applyFilters({ status: s }); };
 
 const tone: Record<string, string> = { paid: 'bg-emerald-100 text-emerald-700', unpaid: 'bg-amber-100 text-amber-700', partially_paid: 'bg-amber-100 text-amber-700', void: 'bg-muted', refunded: 'bg-rose-100 text-rose-700', draft: 'bg-muted' };
 const money = (n: number) => `${props.currency}${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -34,7 +47,7 @@ const money = (n: number) => `${props.currency}${n.toLocaleString(undefined, { m
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h1 class="text-xl font-semibold tracking-tight">Invoices</h1>
-                <p class="text-sm text-muted-foreground">{{ invoices.total }} total</p>
+                <p class="text-sm text-muted-foreground">{{ invoices.total }} {{ status === 'unpaid' ? 'unpaid' : 'total' }}</p>
             </div>
             <div class="flex gap-2">
                 <Button as-child variant="secondary"><Link href="/promotions"><Tag class="size-4" /> Promotions</Link></Button>
@@ -42,13 +55,19 @@ const money = (n: number) => `${props.currency}${n.toLocaleString(undefined, { m
             </div>
         </div>
 
-        <form class="flex gap-2" @submit.prevent="submitSearch">
-            <div class="relative max-w-sm flex-1">
-                <Search class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                <Input v-model="search" placeholder="Search invoice no. or patient…" class="pl-8" />
+        <div class="flex flex-wrap items-center gap-2">
+            <form class="flex flex-1 gap-2" @submit.prevent="submitSearch">
+                <div class="relative max-w-sm flex-1">
+                    <Search class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                    <Input v-model="search" placeholder="Search invoice no. or patient…" class="pl-8" />
+                </div>
+                <Button type="submit" variant="secondary">Search</Button>
+            </form>
+            <div class="flex gap-1 rounded-lg border p-1">
+                <Button size="sm" :variant="status === 'all' ? 'default' : 'ghost'" @click="setStatus('all')">All</Button>
+                <Button size="sm" :variant="status === 'unpaid' ? 'default' : 'ghost'" @click="setStatus('unpaid')">Unpaid</Button>
             </div>
-            <Button type="submit" variant="secondary">Search</Button>
-        </form>
+        </div>
 
         <Card>
             <CardContent class="p-0">
@@ -68,6 +87,16 @@ const money = (n: number) => `${props.currency}${n.toLocaleString(undefined, { m
                             </tr>
                             <tr v-if="invoices.data.length === 0"><td colspan="6" class="px-4 py-10 text-center text-muted-foreground">No invoices found.</td></tr>
                         </tbody>
+                        <tfoot v-if="invoices.data.length" class="border-t bg-muted/30">
+                            <tr class="font-medium">
+                                <td class="px-4 py-2.5" colspan="2">
+                                    {{ status === 'unpaid' ? 'Outstanding (unpaid)' : 'Outstanding' }}
+                                    <span class="text-muted-foreground">· {{ summary.count }} invoice(s)</span>
+                                </td>
+                                <td class="px-4 py-2.5 text-right text-amber-700 dark:text-amber-400">{{ money(summary.outstanding) }}</td>
+                                <td colspan="3"></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </CardContent>

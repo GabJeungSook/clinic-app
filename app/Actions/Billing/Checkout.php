@@ -57,6 +57,11 @@ class Checkout
      * @param  array<int, array{method:string, amount:float, reference?:?string}>  $payments
      * @return array{invoice: ?Invoice, receipt: ?Receipt, sessions: array<int, \App\Models\TreatmentSession>}
      */
+    /**
+     * @param  array<int, array{invoice_id:string, amount:float, discount?:float, method?:string, reference?:?string}>  $settlements
+     *         Payments collected now against the patient's EXISTING unpaid invoices
+     *         (e.g. paying off a prepaid package balance during a session visit).
+     */
     public function handle(
         ?Patient $patient,
         array $lineGroups,
@@ -66,9 +71,10 @@ class Checkout
         ?int $performedBy = null,
         ?string $notes = null,
         bool $generateReceipt = false,
+        array $settlements = [],
     ): array {
         return DB::transaction(function () use (
-            $patient, $lineGroups, $payments, $invoicePromotionId, $invoiceDiscount, $performedBy, $notes, $generateReceipt
+            $patient, $lineGroups, $payments, $invoicePromotionId, $invoiceDiscount, $performedBy, $notes, $generateReceipt, $settlements
         ) {
             $sessions = [];
             $invoiceLines = [];
@@ -180,57 +186,100 @@ class Checkout
                 ];
             }
 
-            // Nothing chargeable (e.g. only package-draw sessions) → no invoice, no payment.
-            if (empty($invoiceLines)) {
-                return ['invoice' => null, 'receipt' => null, 'sessions' => $sessions];
-            }
-
-            // 4. One invoice with promotions + tax.
-            $invoice = $this->createInvoice->handle(
-                $patient,
-                $invoiceLines,
-                invoicePromotionId: $invoicePromotionId,
-                manualInvoiceDiscount: $invoiceDiscount,
-                status: InvoiceStatus::Unpaid,
-                createdBy: $performedBy,
-                notes: $notes,
-            );
-
-            // 5. Deduct retail stock (SaleOut), tracing each movement to the sale.
-            foreach ($retailToConsume as [$item, $qty]) {
-                $this->consume->handle(
-                    $item,
-                    $qty,
-                    reference: $invoice,
-                    performedBy: $performedBy,
-                    type: MovementType::SaleOut,
+            // 4–8 only run when there's something new to bill this visit. A visit
+            // that only draws prepaid sessions has no new invoice, but may still
+            // settle old balances (step 9), so we don't return early here.
+            $invoice = null;
+            $receipt = null;
+            if (! empty($invoiceLines)) {
+                // 4. One invoice with promotions + tax.
+                $invoice = $this->createInvoice->handle(
+                    $patient,
+                    $invoiceLines,
+                    invoicePromotionId: $invoicePromotionId,
+                    manualInvoiceDiscount: $invoiceDiscount,
+                    status: InvoiceStatus::Unpaid,
+                    createdBy: $performedBy,
+                    notes: $notes,
                 );
+
+                // 5. Deduct retail stock (SaleOut), tracing each movement to the sale.
+                foreach ($retailToConsume as [$item, $qty]) {
+                    $this->consume->handle(
+                        $item,
+                        $qty,
+                        reference: $invoice,
+                        performedBy: $performedBy,
+                        type: MovementType::SaleOut,
+                    );
+                }
+
+                // 6. Link newly created packages to the invoice that paid for them.
+                foreach ($newCourses as $course) {
+                    $course->forceFill(['invoice_id' => $invoice->id])->save();
+                }
+
+                // 7. Split payments — status auto-derives (Unpaid / PartiallyPaid / Paid).
+                foreach ($payments as $payment) {
+                    $amount = round((float) $payment['amount'], 2);
+                    if ($amount === 0.0) {
+                        continue;
+                    }
+                    $this->recordPayment->handle(
+                        $invoice,
+                        $amount,
+                        PaymentMethod::from($payment['method']),
+                        reference: $payment['reference'] ?? null,
+                        receivedBy: $performedBy,
+                    );
+                }
+
+                // 8. Optional receipt.
+                $receipt = $generateReceipt ? $this->generateReceipt->handle($invoice->fresh()) : null;
             }
 
-            // 6. Link newly created packages to the invoice that paid for them.
-            foreach ($newCourses as $course) {
-                $course->forceFill(['invoice_id' => $invoice->id])->save();
-            }
-
-            // 7. Split payments — status auto-derives (Unpaid / PartiallyPaid / Paid).
-            foreach ($payments as $payment) {
-                $amount = round((float) $payment['amount'], 2);
-                if ($amount === 0.0) {
+            // 9. Settle outstanding balances on the patient's EXISTING invoices —
+            //    e.g. collecting a per-session installment on a prepaid package while
+            //    the patient is in for that session. An optional discount writes off
+            //    part of the balance; the payment covers the rest.
+            $settled = [];
+            foreach ($settlements as $s) {
+                $existing = Invoice::find($s['invoice_id']);
+                if (! $existing) {
                     continue;
                 }
-                $this->recordPayment->handle(
-                    $invoice,
-                    $amount,
-                    PaymentMethod::from($payment['method']),
-                    reference: $payment['reference'] ?? null,
-                    receivedBy: $performedBy,
-                );
+
+                $discount = round((float) ($s['discount'] ?? 0), 2);
+                $amount = round((float) ($s['amount'] ?? 0), 2);
+
+                if ($discount > 0) {
+                    $existing->forceFill([
+                        'discount_total' => round((float) $existing->discount_total + $discount, 2),
+                        'grand_total' => max(0, round((float) $existing->grand_total - $discount, 2)),
+                    ])->save();
+                }
+
+                if ($amount > 0) {
+                    // RecordPayment re-derives the invoice status against the (now
+                    // possibly discounted) grand total.
+                    $this->recordPayment->handle(
+                        $existing,
+                        $amount,
+                        PaymentMethod::from($s['method'] ?? 'cash'),
+                        reference: $s['reference'] ?? null,
+                        receivedBy: $performedBy,
+                    );
+                }
+
+                $settled[] = $existing->fresh();
             }
 
-            // 8. Optional receipt.
-            $receipt = $generateReceipt ? $this->generateReceipt->handle($invoice->fresh()) : null;
-
-            return ['invoice' => $invoice->fresh('items'), 'receipt' => $receipt, 'sessions' => $sessions];
+            return [
+                'invoice' => $invoice?->fresh('items'),
+                'receipt' => $receipt,
+                'sessions' => $sessions,
+                'settled' => $settled,
+            ];
         });
     }
 }

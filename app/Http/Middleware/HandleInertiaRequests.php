@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Updater\UpdaterState;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -53,6 +54,12 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+            ],
+            // Drives the "Update available" badge in the sidebar. Lazy so it only
+            // reads the cache when a full page load / partial reload needs it.
+            'update' => fn () => [
+                'currentVersion' => config('nativephp.version'),
+                'status' => UpdaterState::get(),
             ],
         ];
     }

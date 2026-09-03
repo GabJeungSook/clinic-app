@@ -455,21 +455,6 @@ class SampleDataSeeder extends Seeder
             return;
         }
 
-        $notes = [
-            'Patient tolerated the procedure well. No adverse reactions noted.',
-            'Mild erythema post-treatment; advised cold compress and sun protection.',
-            'Visible improvement since last session. Continuing the planned schedule.',
-            'Good response. Recommended hydrating serum and daily SPF for aftercare.',
-            'Reduced redness compared to the previous visit. Patient happy with progress.',
-        ];
-
-        $purchaseCourse = app(PurchaseTreatmentCourse::class);
-        $startSession = app(StartTreatmentSession::class);
-        $completeSession = app(CompleteTreatmentSession::class);
-        $createInvoice = app(CreateInvoice::class);
-        $recordPayment = app(RecordPayment::class);
-        $generateReceipt = app(GenerateReceipt::class);
-
         foreach (array_slice($patients, 0, 6) as $patient) {
             foreach (collect($names)->shuffle()->take(rand(1, 2)) as $name) {
                 $service = $services[$name] ?? null;
@@ -477,34 +462,104 @@ class SampleDataSeeder extends Seeder
                     continue;
                 }
 
-                $sessions = rand(1, 6);
-                $perSession = (float) $service->default_price / max(1, (int) $service->default_session_count);
-                $price = round($perSession * $sessions, 2);
-                $purchasedAt = now()->subDays(rand(3, 40));
-                $course = $purchaseCourse->handle($patient, $service, totalSessions: $sessions, price: $price, purchasedAt: $purchasedAt);
+                // Use the service's natural package size + price (realistic totals).
+                $sessions = max(1, (int) $service->default_session_count);
+                // Extra courses don't consume stock (keeps demo inventory healthy).
+                $this->seedCourse($patient, $service, $sessions, (float) $service->default_price, now()->subDays(rand(3, 40)), consumeStock: false);
+            }
+        }
+    }
 
-                $performer = $this->staff[array_rand($this->staff)]->id;
-                for ($n = 0; $n < rand(1, $sessions); $n++) {
-                    $performedAt = (clone $purchasedAt)->addDays($n * rand(7, 14))->setTime(rand(9, 16), rand(0, 3) * 15);
-                    if ($performedAt->isFuture()) {
-                        break;
-                    }
-                    $session = $startSession->handle($patient, $service, $course, performedBy: $performer);
-                    $completeSession->handle($session, performedBy: $performer, consumptionOverrides: [], allowOverride: true, performedAt: $performedAt);
-                    $session->update(['clinical_notes' => $notes[array_rand($notes)]]);
-                }
+    /** Notes reused across seeded sessions. */
+    private const SESSION_NOTES = [
+        'Patient tolerated the procedure well. No adverse reactions noted.',
+        'Mild erythema post-treatment; advised cold compress and sun protection.',
+        'Visible improvement since last session. Continuing the planned schedule.',
+        'Good response. Recommended hydrating serum and daily SPF for aftercare.',
+        'Reduced redness compared to the previous visit. Patient happy with progress.',
+    ];
 
-                $invoice = $createInvoice->handle(
-                    $patient,
-                    [['description' => $course->name_snapshot, 'quantity' => 1, 'unit_price' => $price, 'itemable' => $course]],
-                    status: InvoiceStatus::Unpaid,
-                    createdBy: $performer,
-                    issuedAt: $purchasedAt,
-                );
-                if (rand(1, 10) <= 7) {
-                    $recordPayment->handle($invoice, (float) $invoice->grand_total, PaymentMethod::Cash, receivedBy: $performer, paidAt: $purchasedAt);
-                    $generateReceipt->handle($invoice->fresh());
-                }
+    /**
+     * Seed one treatment package end-to-end and *consistently*, so the data can
+     * be traced through the system:
+     *   - a course of $sessions at a clean per-session price;
+     *   - a realistic number of performed sessions on past dates;
+     *   - an invoice billed PER SESSION (qty = sessions, not one lump line); and
+     *   - a payment that matches the scenario, so money paid always reconciles
+     *     with the sessions performed:
+     *       • paid        — prepaid in full (may be ongoing or completed)
+     *       • installment — pay-as-you-go: paid = sessions performed so far
+     *       • deposit     — invoiced but unpaid, no sessions yet (outstanding)
+     */
+    private function seedCourse(Patient $patient, Service $service, int $sessions, float $price, CarbonInterface $purchasedAt, bool $consumeStock): void
+    {
+        $perSession = round($price / max(1, $sessions), 2);
+
+        // Pick a scenario and how many sessions to actually perform.
+        if ($sessions === 1) {
+            [$scenario, $intended] = rand(1, 10) <= 8 ? ['paid', 1] : ['deposit', 0];
+        } else {
+            $roll = rand(1, 10);
+            [$scenario, $intended] = match (true) {
+                $roll <= 6 => ['paid', rand(1, $sessions)],
+                $roll <= 9 => ['installment', rand(1, $sessions - 1)],
+                default => ['deposit', 0],
+            };
+        }
+
+        $course = app(PurchaseTreatmentCourse::class)->handle(
+            $patient,
+            $service,
+            totalSessions: $sessions,
+            price: round($perSession * $sessions, 2),
+            purchasedAt: $purchasedAt,
+        );
+
+        $performer = $this->staff[array_rand($this->staff)]->id;
+        $start = app(StartTreatmentSession::class);
+        $complete = app(CompleteTreatmentSession::class);
+
+        $performed = 0;
+        for ($n = 0; $n < $intended; $n++) {
+            $performedAt = (clone $purchasedAt)->addDays($n * rand(7, 14))->setTime(rand(9, 16), rand(0, 3) * 15);
+            if ($performedAt->isFuture()) {
+                break;
+            }
+            $session = $start->handle($patient, $service, $course, performedBy: $performer);
+            if ($consumeStock) {
+                $complete->handle($session, performedBy: $performer, allowOverride: true, performedAt: $performedAt);
+            } else {
+                $complete->handle($session, performedBy: $performer, consumptionOverrides: [], allowOverride: true, performedAt: $performedAt);
+            }
+            $session->update(['clinical_notes' => self::SESSION_NOTES[array_rand(self::SESSION_NOTES)]]);
+            $performed++;
+        }
+
+        // Bill the package PER SESSION so the invoice reconciles with the sessions.
+        $desc = $sessions > 1 ? "{$course->name_snapshot} (package of {$sessions})" : $course->name_snapshot;
+        $invoice = app(CreateInvoice::class)->handle(
+            $patient,
+            [['description' => $desc, 'quantity' => $sessions, 'unit_price' => $perSession, 'itemable' => $course]],
+            status: InvoiceStatus::Unpaid,
+            createdBy: $performer,
+            issuedAt: $purchasedAt,
+        );
+
+        // Link the course back to its invoice (the real checkout does this too),
+        // so the package's paid/unpaid status can be traced from the course.
+        $course->forceFill(['invoice_id' => $invoice->id])->save();
+
+        $grand = (float) $invoice->grand_total;
+        $pay = match ($scenario) {
+            'paid' => $grand,
+            'installment' => $performed > 0 ? round($grand * $performed / $sessions, 2) : 0.0,
+            default => 0.0,
+        };
+
+        if ($pay > 0) {
+            app(RecordPayment::class)->handle($invoice, $pay, PaymentMethod::Cash, receivedBy: $performer, paidAt: $purchasedAt);
+            if ($pay >= $grand) {
+                app(GenerateReceipt::class)->handle($invoice->fresh());
             }
         }
     }
@@ -542,25 +597,18 @@ class SampleDataSeeder extends Seeder
     /** @param array<int, Patient> $patients */
     private function makeTreatmentsAndBilling(array $patients): void
     {
-        // [service name, total sessions, course price]
+        // [service name, total sessions, course price] — prices divide evenly per session.
         $templates = [
-            ['Diode Hair Removal – Legs', 6, 18000],
-            ['Diode Hair Removal – Underarms', 6, 12000],
-            ['Pico Freckle Refinement', 4, 20000],
-            ['HIFU Face Sculpt', 3, 25000],
-            ['Microneedling', 4, 16000],
-            ['Rejuran H', 3, 24000],
+            ['Diode Hair Removal – Legs', 6, 18000],       // 3,000 / session
+            ['Diode Hair Removal – Underarms', 6, 12000],  // 2,000 / session
+            ['Pico Freckle Refinement', 4, 20000],         // 5,000 / session
+            ['HIFU Face Sculpt', 3, 24000],                // 8,000 / session
+            ['Microneedling', 4, 16000],                   // 4,000 / session
+            ['Rejuran H', 3, 24000],                       // 8,000 / session
             ['Botox – Forehead', 1, 8000],
             ['Lip Filler', 1, 15000],
-            ['Mesoheal – Korean Glow', 4, 14000],
+            ['Mesoheal – Korean Glow', 4, 14000],          // 3,500 / session
         ];
-
-        $purchaseCourse = app(PurchaseTreatmentCourse::class);
-        $startSession = app(StartTreatmentSession::class);
-        $completeSession = app(CompleteTreatmentSession::class);
-        $createInvoice = app(CreateInvoice::class);
-        $recordPayment = app(RecordPayment::class);
-        $generateReceipt = app(GenerateReceipt::class);
 
         foreach (array_slice($patients, 0, 18) as $idx => $patient) {
             [$serviceName, $sessions, $price] = $templates[$idx % count($templates)];
@@ -569,44 +617,7 @@ class SampleDataSeeder extends Seeder
                 continue;
             }
 
-            $purchasedAt = now()->subDays(rand(3, 40));
-            $course = $purchaseCourse->handle($patient, $service, totalSessions: $sessions, price: $price, purchasedAt: $purchasedAt);
-
-            // Perform a realistic number of sessions on spread-out past dates.
-            $toPerform = min($sessions, rand(1, $sessions));
-            $performer = $this->staff[array_rand($this->staff)]->id;
-            for ($n = 0; $n < $toPerform; $n++) {
-                $performedAt = (clone $purchasedAt)->addDays($n * rand(7, 14))->setTime(rand(9, 16), rand(0, 3) * 15);
-                if ($performedAt->isFuture()) {
-                    break;
-                }
-                $session = $startSession->handle($patient, $service, $course, performedBy: $performer);
-                $completeSession->handle($session, performedBy: $performer, allowOverride: true, performedAt: $performedAt);
-                $session->update(['clinical_notes' => fake()->randomElement([
-                    'Patient tolerated the procedure well. No adverse reactions.',
-                    'Mild redness post-treatment, advised cold compress and sunblock.',
-                    'Good progress noted. Continue with the planned schedule.',
-                    'Slight discomfort during session; settled quickly afterwards.',
-                ])]);
-            }
-
-            // Invoice the course; most are paid (some partially / unpaid).
-            $invoice = $createInvoice->handle(
-                $patient,
-                [['description' => $course->name_snapshot, 'quantity' => 1, 'unit_price' => (float) $price, 'itemable' => $course]],
-                status: InvoiceStatus::Unpaid,
-                createdBy: $performer,
-                issuedAt: $purchasedAt,
-            );
-
-            $roll = rand(1, 10);
-            if ($roll <= 7) {
-                $recordPayment->handle($invoice, (float) $invoice->grand_total, PaymentMethod::Cash, receivedBy: $performer, paidAt: $purchasedAt);
-                $generateReceipt->handle($invoice->fresh());
-            } elseif ($roll <= 9) {
-                $recordPayment->handle($invoice, round((float) $invoice->grand_total / 2, 2), PaymentMethod::Card, receivedBy: $performer, paidAt: $purchasedAt);
-            }
-            // roll == 10 → left unpaid (outstanding).
+            $this->seedCourse($patient, $service, $sessions, (float) $price, now()->subDays(rand(3, 40)), consumeStock: true);
         }
     }
 

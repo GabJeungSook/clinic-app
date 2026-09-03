@@ -156,6 +156,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('clinic-settings/backup', [ClinicSettingsController::class, 'backupNow'])->name('clinic-settings.backup');
         Route::get('clinic-settings/backup/{name}/download', [ClinicSettingsController::class, 'downloadBackup'])->name('clinic-settings.backup.download')->where('name', '[A-Za-z0-9\-_.]+');
         Route::post('clinic-settings/restore', [ClinicSettingsController::class, 'restore'])->name('clinic-settings.restore');
+
+        // Online updates (GitHub releases) — desktop-only; degrade gracefully elsewhere.
+        Route::post('clinic-settings/update/check', [ClinicSettingsController::class, 'checkForUpdates'])->name('clinic-settings.update.check');
+        Route::post('clinic-settings/update/download', [ClinicSettingsController::class, 'downloadUpdate'])->name('clinic-settings.update.download');
+        Route::post('clinic-settings/update/install', [ClinicSettingsController::class, 'installUpdate'])->name('clinic-settings.update.install');
+        Route::get('clinic-settings/update/status', [ClinicSettingsController::class, 'updateStatus'])->name('clinic-settings.update.status');
     });
 });
 

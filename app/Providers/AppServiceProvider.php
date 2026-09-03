@@ -11,10 +11,12 @@ use App\Models\Service;
 use App\Models\TreatmentCourse;
 use App\Models\TreatmentSession;
 use App\Models\User;
+use App\Listeners\UpdaterEventSubscriber;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -49,6 +51,9 @@ class AppServiceProvider extends ServiceProvider
             'purchase' => Purchase::class,
             'purchase_item' => PurchaseItem::class,
         ]);
+
+        // Record auto-updater progress into a pollable status (desktop only).
+        Event::subscribe(UpdaterEventSubscriber::class);
     }
 
     /**
